@@ -174,6 +174,6 @@ export async function signIn(pg, user, pw) {
   return err;
 }
 export async function addLog(pg, tag) {
-  return pg.evaluate(async tag => { state.logs.push({ date: '2020-01-0' + (1 + state.logs.length % 9), dayId: 'smoke', ex: { smoke_ex: [{ w: 10, r: 5 }] }, __tag: tag }); return persist(); }, tag);
+  return pg.evaluate(async tag => { const date = '2020-01-0' + (1 + state.logs.length % 9); state.logs.push({ id: date + '_t' + tag, date, dayId: 'smoke', ex: { smoke_ex: [{ w: 10, r: 5 }] }, __tag: tag }); return persist(); }, tag);
 }
 export const tags = pg => pg.evaluate(() => (state.logs || []).map(l => l.__tag).filter(Boolean));

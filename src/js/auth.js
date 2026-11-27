@@ -69,14 +69,85 @@ async function writeBlob(docFor,box,savedAt){
 const sharedDocs=()=>n=>dataDoc(A.acct.id,n);
 const backupDocs=()=>n=>mine('ilbak-'+A.acct.id+'-'+n);
 async function tryOpen(box){ if(!box||!box.ct) return null; try{ return td.decode(await unseal(A.dek,box)); }catch(e){ return null; } }
+/* ---------- offline-safe sync (online backend only) ----------
+   Every save goes first to an encrypted copy on this device (IndexedDB, same ciphertext as the server),
+   then to the server. If the server can't be reached the copy is marked pending and pushed later.
+   `remoteAt` is the server's savedAt as of our last successful read/write: if the server has moved on
+   since then (another device saved), the two are merged instead of one overwriting the other.
+   A failed read is never treated as "no data". */
+const cacheKey=()=>'cache/enc/'+A.acct.id;
+async function cacheGet(){ try{ return await window.ironPlatform.deviceCache().get(cacheKey()); }catch(e){ return null; } }
+async function cachePut(v){ try{ await window.ironPlatform.deviceCache().put(cacheKey(),v); }catch(e){} }
+let remoteAt=null, syncing=null;
+/* make sure this browser is signed in to the server as this account; false when it can't be reached.
+   (Without a session, row-level security returns nothing — which must never be read as "no data".) */
+async function ensureBackend(){ try{ await backendAs(A.acct.username,A.dekRaw); return true; }catch(e){ return false; } }
 /* newest readable copy wins; a missing or damaged shared copy is repaired from the private backup */
 async function readState(){
-  const [sh,bk]=await Promise.all([readBlob(sharedDocs()).catch(()=>null),readBlob(backupDocs()).catch(()=>null)]);
-  const s=await tryOpen(sh), b=await tryOpen(bk);
-  if(s&&(!b||String(sh.savedAt)>=String(bk.savedAt))) return s;
-  if(b){ try{ await serial(()=>writeBlob(sharedDocs(),{iv:bk.iv,ct:bk.ct},bk.savedAt)); }catch(e){} return b; }
-  return s;
+  if(!backend.remote){
+    const [sh,bk]=await Promise.all([readBlob(sharedDocs()).catch(()=>null),readBlob(backupDocs()).catch(()=>null)]);
+    const s=await tryOpen(sh), b=await tryOpen(bk);
+    if(s&&(!b||String(sh.savedAt)>=String(bk.savedAt))) return s;
+    if(b){ try{ await serial(()=>writeBlob(sharedDocs(),{iv:bk.iv,ct:bk.ct},bk.savedAt)); }catch(e){} return b; }
+    return s;
+  }
+  const local=await cacheGet();
+  let sh=null, bk=null, reached=await ensureBackend();
+  if(reached){ try{ sh=await readBlob(sharedDocs()); }catch(e){ reached=false; } }
+  if(reached){ try{ bk=await readBlob(backupDocs()); }catch(e){} remoteAt=sh?String(sh.savedAt||''):''; }
+  const cands=[];
+  for(const [box,src] of [[sh,'shared'],[bk,'backup'],[local,'local']]){ const t=await tryOpen(box); if(t) cands.push({t,at:String(box.savedAt||''),src}); }
+  if(!cands.length){ if(!reached) throw new Error('offline'); return null; }
+  cands.sort((x,y)=>x.at<y.at?1:x.at>y.at?-1:0);
+  const best=cands[0];
+  if(reached&&best.src==='backup'&&sh===null){ try{ await serial(()=>writeBlob(sharedDocs(),{iv:bk.iv,ct:bk.ct},bk.savedAt)); remoteAt=String(bk.savedAt); }catch(e){} }
+  if(local&&local.pending) setTimeout(()=>{ syncNow(); },0);   // finish an offline save from earlier
+  return best.t;
 }
+/* union two saved states: arrays of records merge by id (or date), maps merge key by key; `mine` wins ties */
+function mergeStates(mine,theirs){
+  const keyOf=x=>x&&typeof x==='object'?(x.id!=null?'id:'+x.id:x.date!=null?'d:'+x.date+(x.ts||''):null):null;
+  const merge=(a,b)=>{
+    if(Array.isArray(a)&&Array.isArray(b)){
+      if(!a.concat(b).every(x=>keyOf(x))) return a;
+      const m=new Map(); b.forEach(x=>m.set(keyOf(x),x)); a.forEach(x=>m.set(keyOf(x),x)); return [...m.values()];
+    }
+    if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){
+      const o={...b}; for(const k of Object.keys(a)) o[k]=k in b?merge(a[k],b[k]):a[k]; return o;
+    }
+    return a===undefined?b:a;
+  };
+  return merge(mine,theirs);
+}
+async function pushRemote(box,at){
+  await serial(()=>writeBlob(sharedDocs(),box,at));
+  remoteAt=at; lastBox={box,at}; scheduleBackup();
+}
+/* push a pending offline save; merge first if another device saved meanwhile */
+function syncNow(){
+  if(!backend||!backend.remote||!A.acct) return Promise.resolve(false);
+  return syncing||(syncing=(async()=>{
+    const local=await cacheGet(); if(!local||!local.pending) return true;
+    if(!(await ensureBackend())) return false;                                 // still offline
+    let sh; try{ sh=await readBlob(sharedDocs()); }catch(e){ return false; }
+    const theirAt=sh?String(sh.savedAt||''):'';
+    let box={iv:local.iv,ct:local.ct}, at=local.savedAt, merged=null;
+    if(sh&&theirAt!==(local.base||'')&&theirAt!==remoteAt){
+      const theirs=await tryOpen(sh), mine=await tryOpen(local);
+      if(theirs&&mine){
+        const m=mergeStates(JSON.parse(mine),JSON.parse(theirs));
+        at=new Date().toISOString(); m.savedAt=at; merged=JSON.stringify(m);
+        box=await seal(A.dek,te.encode(merged));
+      }
+    }
+    try{ await pushRemote(box,at); }catch(e){ return false; }
+    await cachePut({...box,savedAt:at,pending:false,base:at});
+    if(merged&&typeof window.ironlogAdoptState==='function') window.ironlogAdoptState(merged);
+    return true;
+  })().finally(()=>{ syncing=null; }));
+}
+addEventListener('online',()=>{ syncNow(); });
+setInterval(()=>{ if(navigator.onLine!==false) syncNow(); },60000);
 let bakTimer=null, lastBox=null;
 function scheduleBackup(){
   clearTimeout(bakTimer);
@@ -84,9 +155,14 @@ function scheduleBackup(){
 }
 async function writeState(str){
   if(!A.acct) throw new Error('not signed in');
-  const box=await seal(A.dek,te.encode(str)), at=new Date().toISOString();
-  await serial(()=>writeBlob(sharedDocs(),box,at));
-  lastBox={box,at}; scheduleBackup();
+  const box=await seal(A.dek,te.encode(str));
+  let at=new Date().toISOString(); try{ const s=JSON.parse(str); if(s&&s.savedAt) at=String(s.savedAt); }catch(e){}
+  if(!backend.remote){ await serial(()=>writeBlob(sharedDocs(),box,at)); lastBox={box,at}; scheduleBackup(); return; }
+  const prev=await cacheGet();
+  const base=prev&&prev.pending?prev.base:remoteAt;          // the server version this edit was made on top of
+  await cachePut({...box,savedAt:at,pending:true,base:base||''});
+  const ok=await syncNow();
+  if(!ok&&typeof window.ironlogSavedOffline==='function') window.ironlogSavedOffline();
 }
 /* push the pending backup now (sign-out, page hide) */
 function flushBackup(){ if(bakTimer&&lastBox){ clearTimeout(bakTimer); bakTimer=null; const x=lastBox; return serial(()=>writeBlob(backupDocs(),x.box,x.at)).catch(()=>{}); } return Promise.resolve(); }
@@ -112,10 +188,10 @@ async function setSignedIn(acct,raw,remember){
 async function openRemembered(id){
   const dv=devGet(), d=dv.list[id]; if(!d) return false;
   try{
-    const u=await userRef(d.username).get();
-    if(u.exists&&u.data().acct===id) await backendAs(d.username,unb64(d.dek));
-    if(!u.exists||u.data().acct!==id){ delete dv.list[id]; if(dv.last===id) dv.last=null; devPut(dv); return false; }
-    await setSignedIn({id,username:d.username,name:u.data().name||d.name||d.username},unb64(d.dek),false);
+    let u=null; try{ u=await userRef(d.username).get(); }catch(e){}       // offline: open from this device's copy
+    if(u&&(!u.exists||u.data().acct!==id)){ delete dv.list[id]; if(dv.last===id) dv.last=null; devPut(dv); return false; }
+    try{ await backendAs(d.username,unb64(d.dek)); }catch(e){ if(u) throw e; }   // offline: server sign-in happens on reconnect
+    await setSignedIn({id,username:d.username,name:(u&&u.data().name)||d.name||d.username},unb64(d.dek),false);
     return true;
   }catch(e){ return false; }
 }
@@ -288,6 +364,7 @@ function renderCard(){
   };
 }
 
-window.IronAuth={ensure,init,readState,writeState,flushBackup,signOut,switchProfile,renderCard,get acct(){ return A.acct; },
-  _test:{normRecovery,USER_RE}};
+window.IronAuth={ensure,init,readState,writeState,flushBackup,signOut,switchProfile,renderCard,syncNow,get acct(){ return A.acct; },
+  pending:async()=>{ if(!A.acct||!backend||!backend.remote) return false; const c=await cacheGet(); return !!(c&&c.pending); },
+  _test:{normRecovery,USER_RE,mergeStates}};
 })();

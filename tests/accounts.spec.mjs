@@ -85,7 +85,7 @@ const forgot = async (pg, user, code, pw) => {
   const dbTags = async p => JSON.parse(await p.evaluate(() => IronAuth.readState())).logs.map(l => l.__tag).filter(Boolean);
   check('[sb] closing an unchanged phone keeps newer data from the other phone', (await dbTags(B)).includes('b-newer'));
   // ...but real unsaved edits are still saved on close
-  await B.evaluate(() => { state.logs.push({ date: '2020-02-02', dayId: 'smoke', ex: { smoke_ex: [{ w: 1, r: 1 }] }, __tag: 'unsaved-edit' }); window.dispatchEvent(new Event('pagehide')); });
+  await B.evaluate(() => { state.logs.push({ id: '2020-02-02_tunsaved', date: '2020-02-02', dayId: 'smoke', ex: { smoke_ex: [{ w: 1, r: 1 }] }, __tag: 'unsaved-edit' }); window.dispatchEvent(new Event('pagehide')); });
   await B.waitForTimeout(600);
   check('[sb] unsaved edits are still saved on close', (await dbTags(B)).includes('unsaved-edit'));
   // coming back to the foreground picks up the other phone's changes

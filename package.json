@@ -7,7 +7,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "python3 tools/build.py && node tests/smoke.spec.mjs && node tests/accounts.spec.mjs && node tests/ai.spec.mjs && node tests/crew.spec.mjs",
+    "test": "python3 tools/build.py && node tests/smoke.spec.mjs && node tests/accounts.spec.mjs && node tests/ai.spec.mjs && node tests/crew.spec.mjs && node tests/offline.spec.mjs",
     "build": "python3 tools/build.py"
   },
   "keywords": [],

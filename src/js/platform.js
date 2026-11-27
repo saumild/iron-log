@@ -145,8 +145,11 @@ const downloads={async save({filename,data}){
   setTimeout(()=>URL.revokeObjectURL(url),4000); return {status:'saved'};
 }};
 const services={db,user:userSvc,auth:authSvc,downloads};
+let devCache=null;
 window.ironPlatform={
   backend:remote?'supabase':'device',
+  /* on-device store (IndexedDB) for the encrypted offline copy of a synced account */
+  deviceCache(){ return devCache||(devCache=deviceStore()); },
   async use(name){ if(name==='sample') return window.IronAI?window.IronAI.sample():null; return services[name]||null; },
   _test:{makeDb,applyQuery,supabaseStore,deviceStore},
 };

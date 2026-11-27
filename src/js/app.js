@@ -518,6 +518,15 @@ function flush(){
 window.addEventListener('pagehide',flush);
 window.addEventListener('beforeunload',flush);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flush(); else pickUpRemote(); });
+/* offline sync hooks (js/auth.js): a pending save merged with another device's newer save */
+window.ironlogAdoptState=raw=>{
+  try{ const d=JSON.parse(raw); if(!validState(d)) return;
+    state=sanitize(d); markClean();
+    renderCoach(); renderGamify(); if(window.Workout) Workout.renderHome(); if(activeView!=='train') showView(activeView);
+    toast('Synced — merged with your other device'); }catch(e){ console.error('adopt failed',e); }
+};
+let offlineToastAt=0;
+window.ironlogSavedOffline=()=>{ if(Date.now()-offlineToastAt>60000){ offlineToastAt=Date.now(); toast('Saved on this phone — will sync when you’re online'); } };
 /* back in the foreground: if another device saved newer data and nothing here is unsaved, reload to show it */
 async function pickUpRemote(){
   try{
@@ -1451,7 +1460,8 @@ $('#fcImgFile').onchange=e=>{ if(e.target.files.length) runFormCheckPhotos(e.tar
 
 /* PWA: register the service worker so the app opens offline */
 try{
-  if(!HOSTED && location.protocol.startsWith('http') && 'serviceWorker' in navigator){
+  // offline support wherever the app is served over http(s) — not inside the Claude artifact viewer
+  if(location.protocol.startsWith('http') && !/(^|\.)claude\.(ai|com)$/.test(location.hostname) && 'serviceWorker' in navigator){
     window.addEventListener('load',()=>{ try{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){} });
   }
 }catch(e){}
