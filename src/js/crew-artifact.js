@@ -1,5 +1,11 @@
 /* js/crew-artifact.js */
-/* ================= Crew inside a Claude artifact =================
+/* ================= Crew: private groups joined by invite link =================
+   Standalone build: a crew is a private group ilgrp/<groupId>/m/<account id>/…  The group id is a
+   random 24-char secret carried by the invite link (#crew=<id>); row-level security only lets
+   members read a group, and each member writes only under their own account (supabase/schema.sql).
+   Your crew id is kept on your private account record (ilacct/<id>.crew). Needs the Supabase backend;
+   in device-only mode Crew reports 'out'.
+   (Original notes from the Claude-artifact version follow; paths there were crew/<id>/….)
    An artifact page can't reach the Iron Log server, so here Crew runs on the artifact's own
    shared `db`. Your crew is everyone the artifact is shared with who tapped "Join crew".
    It answers the same requests as netlify/lib/api-core.mjs, with the same response shapes,
@@ -19,7 +25,18 @@ if(!HOSTED) return;
 const AVATARS=['🏋️','💪','🔥','🦍','🐻','🦁','🐺','🦅','⚡','🚀','🥇','🧠','🐉','🌟','🏃','🧘'];
 const DATE_RE=/^\d{4}-\d{2}-\d{2}$/, POST_ID_RE=/^\d{4}-\d{2}-\d{2}_[a-z0-9_-]{1,40}$/;
 const NUDGE_GAP_MS=6*3600*1000, FEED_LIMIT=30, KEEP_POSTS=60;
-let db=null, user=null, uid=null, ready=null;
+let db=null, user=null, uid=null, ready=null, gid=null;
+const GID_RE=/^[a-z0-9]{20,40}$/, INV_KEY='ironlog-crew-invite';
+const newGid=()=>{ const a=crypto.getRandomValues(new Uint8Array(24)); return [...a].map(b=>'abcdefghijklmnopqrstuvwxyz0123456789'[b%36]).join(''); };
+/* an invite link (#crew=<id>) is remembered for this tab until it's used, and removed from the address bar */
+function grabInvite(){ try{ const m=String(location.hash||'').match(/(?:^#|&)crew=([a-z0-9]{20,40})/);
+  if(m){ sessionStorage.setItem(INV_KEY,m[1]); history.replaceState(null,'',location.pathname+location.search); return true; } }catch(e){} return false; }
+grabInvite();
+// the link opened in a tab where Iron Log is already running: only the #fragment changes, no reload
+addEventListener('hashchange',()=>{ if(grabInvite()) dispatchEvent(new Event('ironlog-crew-invite')); });
+const pendingInvite=()=>{ try{ const v=sessionStorage.getItem(INV_KEY)||''; return GID_RE.test(v)?v:''; }catch(e){ return ''; } };
+const clearInvite=()=>{ try{ sessionStorage.removeItem(INV_KEY); }catch(e){} };
+const acctRef=()=>db.doc('ilacct/'+uid);
 
 function fail(msg){ return new Error(msg); }
 const str=(v,max)=>String(v==null?'':v).trim().slice(0,max);
@@ -31,21 +48,30 @@ const avatarOk=a=>AVATARS.includes(a)?a:'🏋️';
 function init(){
   return ready||(ready=(async()=>{
     // Crew identity is the signed-in Iron Log account, never the Claude account
+    if(!window.ironPlatform||ironPlatform.backend!=='supabase') return false;   // Crew needs the online backend
     const d=await window.ironPlatform.use('db'); const acc=window.IronAuth&&IronAuth.acct;
     if(!d||!acc){ ready=null; return false; }
-    db=d; uid=acc.id; return true;
+    db=d; uid=acc.id;
+    try{ const a=await acctRef().get(); const g=a.exists?a.data().crew:''; gid=GID_RE.test(g||'')?g:null; }catch(e){ gid=null; }
+    return true;
   })().catch(()=>{ ready=null; return false; }));
 }
-const memberRef=id=>db.doc('ilcrew/'+id);
-const sub=(id,name)=>db.collection('ilcrew/'+id+'/'+name);
+const memberRef=id=>db.doc('ilgrp/'+gid+'/m/'+id);
+const sub=(id,name)=>db.collection('ilgrp/'+gid+'/m/'+id+'/'+name);
 const docs=snap=>snap.docs.filter(d=>d.exists).map(d=>({id:d.id,...d.data()}));
 
 /* one write at a time to my member document */
 let chain=Promise.resolve();
 function serial(fn){ const run=chain.then(fn); chain=run.catch(()=>{}); return run; }
 
-async function members(){ return docs(await db.collection('ilcrew').get()); }
-async function myDoc(){ const s=await memberRef(uid).get(); return s.exists?s.data():null; }
+async function members(){ return gid?docs(await db.collection('ilgrp/'+gid+'/m').get()):[]; }
+async function myDoc(){ if(!gid) return null; const s=await memberRef(uid).get(); return s.exists?s.data():null; }
+/* remove everything I wrote in the current group */
+async function leaveGroup(){
+  if(!gid) return;
+  for(const name of ['posts','likes','comments','nudges']) for(const x of docs(await sub(uid,name).get())) await sub(uid,name).doc(x.id).delete();
+  try{ await memberRef(uid).delete(); }catch(e){}
+}
 function personOf(m,ps){ return {username:m.id,name:m.nick||m.name||'Someone',avatar:avatarOk(m.avatar)}; }
 
 /* ---------- the same input checks the server applies ---------- */
@@ -130,6 +156,10 @@ async function call(method,path,body){
   if(method==='GET'&&path==='/feed') return feedView();
 
   if(method==='POST'&&path==='/join') return serial(async()=>{
+    const inv=pendingInvite();
+    if(inv&&inv!==gid){ await leaveGroup(); gid=inv; }       // joining someone's crew (leaves any previous one)
+    if(!gid) gid=newGid();                                  // no invite: start a new crew
+    await acctRef().update({crew:gid}); clearInvite();
     const cur=await myDoc();
     if(!cur) await memberRef(uid).set({joined:Date.now(),name:str(IronAuth.acct.name,30),nick:str(body.nick,30),avatar:avatarOk(body.avatar),summary:null,activity:[],updatedAt:0,inboxClearedAt:Date.now()});
     return {me:await meObj()};
@@ -191,16 +221,18 @@ async function call(method,path,body){
     return {ok:true};
   }
   if(method==='POST'&&path==='/account/delete') return serial(async()=>{
-    for(const name of ['posts','likes','comments','nudges']) for(const x of docs(await sub(uid,name).get())) await sub(uid,name).doc(x.id).delete();
-    await memberRef(uid).delete();
+    await leaveGroup(); gid=null;
+    await acctRef().update({crew:null});
     return {ok:true};
   });
   throw fail('Not available in this version of Crew');
 }
 
 /* 'out' (can't use Crew here), 'new' (not joined yet) or 'in' */
-async function status(){ if(!(await init())) return 'out'; return (await myDoc())?'in':'new'; }
+async function status(){ if(!(await init())) return 'out'; const inv=pendingInvite(); if(inv&&inv!==gid) return 'new'; return (await myDoc())?'in':'new'; }
+const inviteUrl=()=>gid?location.origin+location.pathname+'#crew='+gid:'';
+const invitedTo=()=>{ const v=pendingInvite(); return v&&v!==gid?(gid?'switch':'join'):''; };
 
-window.CrewLocal={call,status,init,AVATARS};
+window.CrewLocal={call,status,init,AVATARS,inviteUrl,invitedTo};
 })();
 

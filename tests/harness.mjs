@@ -21,16 +21,15 @@ export function fakeSupabase() {
   const docs = new Map();      // path -> {path,parent,owner,data}
   const uidOf = t => (t && tokens.get(t)) || null;
   const ownsAcct = (acct, uid) => { const d = docs.get('ilacct/' + acct); return !!d && d.owner === uid; };
-  const canRead = (row, uid) => row.parent === 'ilusers' || (uid && (row.parent === 'ilcrew' || row.parent.startsWith('ilcrew/'))) || (uid && row.owner === uid);
+  const inGroup = (g, uid) => [...docs.values()].some(d => d.parent === 'ilgrp/' + g + '/m' && d.owner === uid);
+  const canRead = (row, uid) => row.parent === 'ilusers' || (uid && row.parent.startsWith('ilgrp/') && inGroup(row.path.split('/')[1], uid)) || (uid && row.owner === uid);
   const canInsert = (row, uid) => {
     if (!uid || row.owner !== uid) return false;
     const p = row.parent, seg = row.path.split('/');
     return p === 'ilusers' || p === 'ilacct'
       || (/^ilacct\/[^/]+\/data$/.test(p) && ownsAcct(seg[1], uid))
       || p === 'data/users/' + uid
-      || (p === 'ilcrew' && ownsAcct(seg[1], uid))
-      || (/^ilcrew\/[^/]+\/posts$/.test(p) && ownsAcct(seg[1], uid))
-      || /^ilcrew\/[^/]+\/(likes|comments|nudges)$/.test(p);
+      || (/^ilgrp\/[a-z0-9]{20,40}\/m\/[^/]+(\/(posts|likes|comments|nudges)\/[^/]+)?$/.test(row.path) && ownsAcct(seg[3], uid));
   };
   const stats = { denied: 0 };
   function handle(body) {
@@ -154,7 +153,12 @@ export async function signUp(pg, user, pw, name = user) {
   await pg.evaluate(() => document.querySelector('.ilauth [data-m="up"]').click());
   await pg.fill('#ilU', user); await pg.fill('#ilN', name); await pg.fill('#ilP', pw); await pg.fill('#ilP2', pw);
   await pg.evaluate(() => document.querySelector('#ilGo').click());
-  await pg.waitForSelector('#ilRc', { timeout: 45000 });
+  try { await pg.waitForSelector('#ilRc', { timeout: 45000 }); }
+  catch (e) {   // diagnostics for the intermittent sign-up timeout seen twice in full-suite runs
+    const st = await pg.evaluate(() => ({ h1: (document.querySelector('.ilauth h1') || {}).textContent, err: (document.querySelector('#ilErr') || {}).textContent, go: (document.querySelector('#ilGo') || {}).outerHTML, user: (document.querySelector('#ilU') || {}).value, acct: !!(window.IronAuth && IronAuth.acct) })).catch(x => 'eval failed: ' + x.message);
+    console.error('SIGNUP TIMEOUT for', user, JSON.stringify(st), 'page errors:', JSON.stringify(pg.errors));
+    throw e;
+  }
   const code = (await pg.textContent('#ilRc')).trim();
   await pg.check('#ilSaved'); await pg.evaluate(() => document.querySelector('#ilGo').click());
   await waitApp(pg);

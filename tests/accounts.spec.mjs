@@ -113,7 +113,7 @@ const forgot = async (pg, user, code, pw) => {
     out.readAliceData = (await db.doc('ilacct/' + acct + '/data/m').get()).exists;
     try { await db.doc('ilusers/alice').set({ acct: 'hijack' }); out.overwriteUser = 'allowed'; } catch (e) { out.overwriteUser = 'denied'; }
     try { await db.doc('ilacct/' + acct + '/data/m').set({ chunks: 0 }); out.overwriteData = 'allowed'; } catch (e) { out.overwriteData = 'denied'; }
-    try { await db.doc('ilcrew/' + acct).set({ name: 'fake alice' }); out.impersonateCrew = 'allowed'; } catch (e) { out.impersonateCrew = 'denied'; }
+    try { await db.doc('ilgrp/abcdefghijklmnopqrstuvwx/m/' + acct).set({ name: 'fake alice' }); out.impersonateCrew = 'allowed'; } catch (e) { out.impersonateCrew = 'denied'; }
     return out;
   }, aliceAcct);
   check("[sb] Bob can't read Alice's data", probe.readAliceData === false);

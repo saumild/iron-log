@@ -36,7 +36,7 @@ function ago(ts){
 const kfmt=v=>v>=10000?Math.round(v/1000)+'k':v>=1000?(v/1000).toFixed(1)+'k':String(Math.round(v));
 
 async function api(method,path,body){
-  if(HOSTED) return CrewLocal.call(method,path,body);   // inside a Claude artifact: crew lives in the artifact's shared db
+  if(HOSTED) return CrewLocal.call(method,path,body);   // standalone: crew lives in private groups in the account database (js/crew-artifact.js)
   let r;
   try{
     r=await fetch('/api'+path,{method,headers:{'content-type':'application/json',...(S.token?{authorization:'Bearer '+S.token}:{})},body:body?JSON.stringify(body):undefined});
@@ -176,13 +176,12 @@ function people(){
 }
 
 /* ================= rendering ================= */
-const ARTIFACT_URL='https://claude.ai/artifact/DW3RKH3z1ncyiUP4KjZeoj';
 let hostedState='';           // artifact mode: 'out' | 'new' | 'in'
 function render(){
   const el=$('#crewBody'); if(!el) return;
   if(HOSTED&&hostedState!=='in'){
     if(!hostedState){ el.innerHTML='<div class="empty" style="text-align:center;padding:24px 0"><span class="spin"></span></div>'; hostedBoot(); return; }
-    if(hostedState==='out'){ el.innerHTML=`<div class="crew-card crew-empty">👥<br><b>Crew isn’t available here</b><br>Open Iron Log signed in to Claude with access to this page to train with friends.</div>`; return; }
+    if(hostedState==='out'){ el.innerHTML=`<div class="crew-card crew-empty">👥<br><b>Crew isn’t available here</b><br>Crew needs an online Iron Log account. This copy of Iron Log keeps everything on this device only.</div>`; return; }
     renderJoin(el); return;
   }
   if(!signedIn()){ renderAuth(el); return; }
@@ -195,20 +194,21 @@ function render(){
   }
 }
 
-/* artifact mode: no accounts — Claude knows who you are; joining just creates your crew entry */
+/* join or start a crew; the signed-in Iron Log account is who you are */
 function renderJoin(el){
-  el.innerHTML=`<div class="crew-card crew-hero">
+  const inv=CrewLocal.invitedTo();
+  el.innerHTML=`${inv?`<div class="crew-card crew-invite">🎟 You’ve been invited to a crew.${inv==='switch'?' Joining it leaves your current crew.':''}</div>`:''}<div class="crew-card crew-hero">
       <div class="crew-hero-ic">👥</div>
       <div class="crew-hero-t">Train with your friends</div>
-      <div class="vsub" style="margin:4px 0 0">Your crew is everyone you share this Iron Log page with. Share workouts, cheer each other on and keep a buddy streak alive. Your training log stays private — the crew sees your stats summary, your workout calendar and the workouts you choose to post.</div>
+      <div class="vsub" style="margin:4px 0 0">Your crew is a private group of friends you invite with a link. Share workouts, cheer each other on and keep a buddy streak alive. Your training log stays private — the crew sees your stats summary, your workout calendar and the workouts you choose to post.</div>
     </div>
     <div class="crew-card">
       <div class="pfield" style="margin-bottom:8px"><label>Crew nickname (optional)</label><input id="jnN" maxlength="30" placeholder="Leave empty to use your Iron Log name"></div>
       <div class="pfield"><label>Avatar</label><div class="avpick" id="jnA">${AVATARS.map((a,i)=>`<button data-av="${a}" class="${i===0?'on':''}">${a}</button>`).join('')}</div></div>
-      <button class="crew-btn" id="jnGo" style="margin-top:12px">Join crew</button>
+      <button class="crew-btn" id="jnGo" style="margin-top:12px">${inv?'Join this crew':'Start my crew'}</button>
       <div id="jnErr"></div>
     </div>
-    <div class="gnote">To add friends, invite them to this page as <b>Editors</b> from the Share menu, then they open it and tap Join crew.</div>`;
+    <div class="gnote">${inv?'Only members can see a crew.':'Once your crew exists, tap <b>＋ invite</b> to send friends its private link.'}</div>`;
   el.querySelectorAll('#jnA [data-av]').forEach(b=>b.onclick=()=>{ el.querySelectorAll('#jnA button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); });
   $('#jnGo').onclick=async()=>{
     const btn=$('#jnGo'); btn.disabled=true;
@@ -216,7 +216,7 @@ function renderJoin(el){
       const av=el.querySelector('#jnA .on');
       const d=await api('POST','/join',{nick:$('#jnN').value.trim(),avatar:av?av.dataset.av:AVATARS[0]});
       S.token='artifact'; S.me=d.me; hostedState='in'; saveS();
-      toast('You joined the crew'); sync(); render();
+      toast(CrewLocal.invitedTo()?'You joined the crew':'You’re in — invite friends with ＋ invite'); sync(); render();
     }catch(e){ $('#jnErr').innerHTML=`<div class="warn" style="margin-top:10px">${esc(e.message)}</div>`; btn.disabled=false; }
   };
 }
@@ -377,7 +377,7 @@ function renderFriends(t){
   const fr=(crew&&crew.friends)||[], out=(crew&&crew.outgoing)||[];
   const mine=buildActivity();
   t.innerHTML=`
-    ${HOSTED?`<button class="crew-card crew-invite-card" id="addInvite">＋ Invite friends — share this page with them as Editors</button>`:`<form class="crew-card addrow" id="addForm"><input class="crew-in" id="addIn" autocapitalize="none" spellcheck="false" placeholder="Friend’s username or 6-letter code"><button class="mini go">Add</button></form>`}
+    ${HOSTED?`<button class="crew-card crew-invite-card" id="addInvite">＋ Invite friends — send them your crew link</button>`:`<form class="crew-card addrow" id="addForm"><input class="crew-in" id="addIn" autocapitalize="none" spellcheck="false" placeholder="Friend’s username or 6-letter code"><button class="mini go">Add</button></form>`}
     ${out.length?`<div class="legend" style="text-align:left;margin:-4px 2px 10px">Waiting on: ${out.map(u=>`${esc(u.name)} <button class="linkbtn" data-cancel="${esc(u.username)}">cancel</button>`).join(' · ')}</div>`:''}
     ${fr.length?fr.map(f=>{
       const w=weekStats(f.activity), bs=buddyStreak(mine,f.activity);
@@ -388,7 +388,7 @@ function renderFriends(t){
         <span class="gpill${w.sessions>=WEEK_TARGET?' done':''}">${w.sessions}/${WEEK_TARGET}</span>
         ${bs?`<span class="gpill flame" title="buddy streak">🤝 ${bs}</span>`:''}
       </div>`;}).join('')
-    :HOSTED?`<div class="crew-card crew-empty">🤝<br><b>Your crew is empty</b><br>Share this page with friends (Share menu → invite as Editor). They show up here once they open it and tap Join crew.</div>`
+    :HOSTED?`<div class="crew-card crew-empty">🤝<br><b>Your crew is empty</b><br>Tap ＋ invite and send friends your crew’s private link. They show up here once they join.</div>`
     :`<div class="crew-card crew-empty">🤝<br><b>Your crew is empty</b><br>Share your code <b>${esc(S.me.code||'')}</b> or tap invite at the top. Friends who add you show up here after you accept.</div>`}`;
   const ai=$('#addInvite'); if(ai) ai.onclick=invite;
   const af=$('#addForm'); if(af) af.onsubmit=async ev=>{
@@ -501,15 +501,18 @@ function renderBoard(t){
 /* ---------- invite + settings ---------- */
 async function invite(){
   if(HOSTED){
-    // the artifact's own Share menu is the invite: friends need edit access to save anything
+    // a crew's invite link carries its private group id: whoever has it can join
+    const url=CrewLocal.inviteUrl();
     $('#crewSheet').innerHTML=`<div class="grab"></div><div class="rv-head"><div class="ttl">Invite friends</div></div>
-      <div class="ask-msg" style="margin:10px 2px">1 · Open this page’s <b>Share</b> menu (top of the Claude page)<br>2 · Invite your friend by email as an <b>Editor</b><br>3 · They open Iron Log and tap <b>Join crew</b></div>
-      <div class="legend" style="text-align:left;margin:0 2px 10px">Friends need Editor access so their workouts and likes can be saved. Editors can also change this page, so invite people you trust.</div>
-      <div class="pfield"><label>Page link</label><input id="invUrl" readonly value="${ARTIFACT_URL}"></div>
-      <div class="dbtns" style="margin-top:12px"><button class="dbtn" id="invCopy">Copy link</button><button class="dbtn go" id="invDone">Done</button></div>`;
+      <div class="ask-msg" style="margin:10px 2px">1 · Send a friend your crew’s private link<br>2 · They open it and sign in or create an Iron Log account<br>3 · They tap <b>Join this crew</b></div>
+      <div class="legend" style="text-align:left;margin:0 2px 10px">Anyone with this link can join and see the crew’s shared workouts and stats, so send it only to people you train with. Your full training log always stays private.</div>
+      <div class="pfield"><label>Crew link</label><input id="invUrl" readonly value="${esc(url)}"></div>
+      <div class="dbtns" style="margin-top:12px"><button class="dbtn" id="invCopy">${navigator.share?'Share link':'Copy link'}</button><button class="dbtn go" id="invDone">Done</button></div>`;
     $('#crewScrim').classList.add('show');
     $('#invDone').onclick=closeSheet;
-    $('#invCopy').onclick=async()=>{ try{ await navigator.clipboard.writeText(ARTIFACT_URL); toast('Link copied'); }catch(e){ const i=$('#invUrl'); i.focus(); i.select(); toast('Select the link and copy it'); } };
+    $('#invCopy').onclick=async()=>{
+      try{ if(navigator.share){ await navigator.share({title:'Join my Iron Log crew',text:'Train with me on Iron Log 💪',url}); return; } }catch(e){ if(e&&e.name==='AbortError') return; }
+      try{ await navigator.clipboard.writeText(url); toast('Link copied'); }catch(e){ const i=$('#invUrl'); i.focus(); i.select(); toast('Select the link and copy it'); } };
     return;
   }
   const url=location.origin+location.pathname+'?add='+encodeURIComponent(S.me.code);
@@ -574,13 +577,14 @@ const invited=HOSTED?false:readInviteParam();
 window.Social={afterSave,afterEdit,afterDelete,renderShare,onReviewClose,sync,render};
 if(HOSTED){ S.token=''; S.me=null; }    // artifact mode: membership comes from the crew store, never a saved token
 Promise.resolve(window.appReady).catch(()=>{}).then(()=>{
-  if(HOSTED){ S.shared={}; loadS(); S.token=''; S.me=null; hostedBoot(); return; }
+  if(HOSTED){ S.shared={}; loadS(); S.token=''; S.me=null; hostedBoot(); if(window.CrewLocal&&CrewLocal.invitedTo()) showView('crew'); return; }
   if(invited&&!signedIn()){ showView('crew'); return; }
   if(signedIn()){
     sync();
     loadCrew().then(()=>{ if(invited) showView('crew'); maybeAddPending(); }).catch(()=>{});
   }
 });
+addEventListener('ironlog-crew-invite',()=>{ if(!HOSTED) return; hostedState=''; hostedBooting=null; S.token=''; S.me=null; showView('crew'); });
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&signedIn()) loadCrew().then(()=>{ if(activeView==='crew') render(); }).catch(()=>{}); });
 })();
 
