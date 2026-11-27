@@ -1,0 +1,21 @@
+{
+  "name": "iron-log",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "python3 tools/build.py && node tests/smoke.spec.mjs",
+    "build": "python3 tools/build.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "private": "true",
+  "type": "module"
+}
