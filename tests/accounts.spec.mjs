@@ -142,5 +142,46 @@ const forgot = async (pg, user, code, pw) => {
   srv.close();
 }
 
+/* ======================= held accounts from the first Iron Log ======================= */
+{
+  info('--- held-account claim (stand-in server) ---');
+  const sb = fakeSupabase();
+  const srv = await startServer('dist/index.html', { supabase: sb });
+  const A = (await device(browser, srv, { fakeSb: true })).pg;
+  await A.open();
+  const rc = await signUp(A, 'olduser', 'old-pass-123', 'Old');
+  await addLog(A, 'old-log'); await A.waitForTimeout(500);
+  // turn what sign-up wrote into the "held" layout the migration produces, and drop the server login
+  const rows = [...sb.docs.values()], U = 'olduser', ph = '00000000-0000-4000-8000-00000000a11d';
+  const dir = rows.find(r => r.path === 'ilusers/' + U), acct = dir.data.acct;
+  sb.docs.clear();
+  sb.docs.set('ilmig/' + U, { path: 'ilmig/' + U, parent: 'ilmig', owner: ph, data: dir.data });
+  for (const r of rows) {
+    if (r.path === 'ilacct/' + acct) sb.docs.set('ilmigd/' + U + '/acct', { path: 'ilmigd/' + U + '/acct', parent: 'ilmigd/' + U, owner: ph, data: { ...r.data, crew: 'abcdefghij0123456789abcd' } });
+    const m = r.path.match(/^ilacct\/[^/]+\/data\/(.+)$/);
+    if (m) sb.docs.set('ilmigd/' + U + '/data:' + m[1], { path: 'ilmigd/' + U + '/data:' + m[1], parent: 'ilmigd/' + U, owner: ph, data: r.data });
+  }
+  sb.users.clear();
+  await A.evaluate(() => localStorage.clear()); await A.reload(); await waitGate(A);
+
+  const B = (await device(browser, srv, { fakeSb: true })).pg; await B.open();
+  await waitGate(B); await B.evaluate(() => document.querySelector('.ilauth [data-m="up"]').click());
+  await B.fill('#ilU', U); await B.fill('#ilN', 'Other'); await B.fill('#ilP', 'other-pass-1'); await B.fill('#ilP2', 'other-pass-1');
+  await B.evaluate(() => document.querySelector('#ilGo').click());
+  await B.waitForFunction(() => document.querySelector('#ilErr') && document.querySelector('#ilErr').textContent.trim(), null, { timeout: 20000 });
+  check('[held] a held username can’t be re-registered', /taken/i.test(await B.textContent('#ilErr')));
+  await B.reload(); await waitGate(B);
+  check('[held] wrong password rejected', /wrong/i.test(await signIn(B, U, 'nope-nope-1')));
+  check('[held] nothing moved by a failed attempt', sb.docs.has('ilmig/' + U));
+  check('[held] original password claims the account', (await signIn(B, U, 'old-pass-123')) === '');
+  check('[held] data came across intact', (await tags(B)).includes('old-log'));
+  check('[held] held rows are gone', ![...sb.docs.keys()].some(k => k.startsWith('ilmig')));
+  check('[held] account now lives under the real login', sb.docs.has('ilacct/' + acct) && sb.docs.get('ilusers/' + U).owner === [...sb.users.values()][0].id);
+  await signOut(B);
+  check('[held] second sign-in works normally', (await signIn(B, U, 'old-pass-123')) === '');
+  check('[held] no uncaught JS errors', B.errors.length === 0, B.errors.slice(0, 3).join(' | '));
+  srv.close();
+}
+
 await browser.close();
 process.exit(report() ? 1 : 0);

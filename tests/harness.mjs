@@ -22,11 +22,13 @@ export function fakeSupabase() {
   const uidOf = t => (t && tokens.get(t)) || null;
   const ownsAcct = (acct, uid) => { const d = docs.get('ilacct/' + acct); return !!d && d.owner === uid; };
   const inGroup = (g, uid) => [...docs.values()].some(d => d.parent === 'ilgrp/' + g + '/m' && d.owner === uid);
-  const canRead = (row, uid) => row.parent === 'ilusers' || (uid && row.parent.startsWith('ilgrp/') && inGroup(row.path.split('/')[1], uid)) || (uid && row.owner === uid);
+  const canRead = (row, uid) => row.parent === 'ilusers' || row.parent === 'ilmig' || (uid && row.parent.startsWith('ilgrp/') && inGroup(row.path.split('/')[1], uid)) || (uid && row.owner === uid);
   const canInsert = (row, uid) => {
     if (!uid || row.owner !== uid) return false;
     const p = row.parent, seg = row.path.split('/');
-    return p === 'ilusers' || p === 'ilacct'
+    const migHeld = u => docs.get('ilmig/' + u);
+    return (p === 'ilusers' && (!migHeld(seg[1]) || (JSON.stringify(migHeld(seg[1]).data.wrap) === JSON.stringify(row.data.wrap) && migHeld(seg[1]).data.acct === row.data.acct)))
+      || (p === 'ilacct' && ![...docs.values()].some(m => m.parent === 'ilmig' && m.data.acct === seg[1]))
       || (/^ilacct\/[^/]+\/data$/.test(p) && ownsAcct(seg[1], uid))
       || p === 'data/users/' + uid
       || (/^ilgrp\/[a-z0-9]{20,40}\/m\/[^/]+(\/(posts|likes|comments|nudges)\/[^/]+)?$/.test(row.path) && ownsAcct(seg[3], uid));
@@ -43,6 +45,22 @@ export function fakeSupabase() {
       const u = users.get(body.email);
       if (!u || u.password !== body.password) return { error: { message: 'Invalid login credentials' } };
       const t = crypto.randomUUID(); tokens.set(t, u.id); return { data: { user: { id: u.id, email: body.email }, session: { access_token: t, user: { id: u.id, email: body.email } } } };
+    }
+    if (body.kind === 'rpc' && body.fn === 'il_claim') {
+      if (!uid) return { error: { message: 'sign in first' } };
+      const u = body.args.u, mig = docs.get('ilmig/' + u); if (!mig) return { data: { ok: false } };
+      const dir = docs.get('ilusers/' + u);
+      if (!dir || dir.owner !== uid || JSON.stringify(dir.data.wrap) !== JSON.stringify(mig.data.wrap) || dir.data.acct !== mig.data.acct) return { error: { message: 'not your account' } };
+      const acct = mig.data.acct, held = [...docs.values()].filter(d => d.parent === 'ilmigd/' + u);
+      const gid = (docs.get('ilmigd/' + u + '/acct') || { data: {} }).data.crew, put = (path, parent, data) => { if (!docs.has(path)) docs.set(path, { path, parent, owner: uid, data }); };
+      let n = 0;
+      for (const r of held) { const k = r.path.split('/')[2];
+        if (k === 'acct') put('ilacct/' + acct, 'ilacct', r.data);
+        else if (k.startsWith('data:')) { put('ilacct/' + acct + '/data/' + k.slice(5), 'ilacct/' + acct + '/data', r.data); n++; }
+        else if (gid && k === 'crew') put('ilgrp/' + gid + '/m/' + acct, 'ilgrp/' + gid + '/m', r.data);
+        else if (gid && k.startsWith('post:')) put('ilgrp/' + gid + '/m/' + acct + '/posts/' + k.slice(5), 'ilgrp/' + gid + '/m/' + acct + '/posts', r.data); }
+      for (const r of held) docs.delete(r.path); docs.delete('ilmig/' + u);
+      return { data: { ok: true, chunks: n, crew: gid || null } };
     }
     if (body.kind === 'signout') { tokens.delete(body.token); return { data: {} }; }
     // table ops
@@ -96,6 +114,7 @@ const FAKE_CLIENT = `(() => {
   }
   const client = {
     from: builder,
+    rpc(fn, args) { return call({ kind: 'rpc', fn, args, token: tok() }).then(r => ({ data: r.data ?? null, error: r.error || null })); },
     auth: {
       async getSession() { return { data: { session: getS() } }; },
       async signUp({ email, password }) { const r = await call({ kind: 'signup', email, password }); if (r.data) localStorage.setItem(SK, JSON.stringify(r.data.session)); return { data: r.data || {}, error: r.error || null }; },

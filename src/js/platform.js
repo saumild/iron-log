@@ -131,11 +131,17 @@ if(remote){
       return data.user.id;
     },
     async signOut(){ try{ await sb.auth.signOut({scope:'local'}); }catch(e){} },
+    /* move a held account (from the old Iron Log) under the signed-in user; see il_claim in schema.sql */
+    async claim(username){
+      const {data,error}=await sb.rpc('il_claim',{u:String(username).toLowerCase()});
+      if(error) throw new Error('Couldn’t move your account: '+error.message);
+      return data;
+    },
   };
   userSvc={async id(){ const s=(await sb.auth.getSession()).data.session; return s?s.user.id:'anon'; }};
 }else{
   store=deviceStore();
-  authSvc={remote:false, async authAs(){ return 'device'; }, async signOut(){}};
+  authSvc={remote:false, async authAs(){ return 'device'; }, async signOut(){}, async claim(){ return null; }};
   userSvc={async id(){ return 'device'; }};
 }
 const db=makeDb(store);

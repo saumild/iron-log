@@ -203,18 +203,30 @@ async function restore(){
 }
 
 /* ---------- account actions ---------- */
+/* Accounts from the first Iron Log are held at ilmig/<username> until their owner signs in once.
+   Proving the password (or recovery code) unlocks the data key, which creates the server login and
+   moves the held rows under it. Returns the held directory entry, or null if there is none. */
+async function heldAccount(u){
+  try{ const h=await db.doc('ilmig/'+u).get(); return h.exists?h.data():null; }catch(e){ return null; }
+}
+async function claimHeld(u,d,raw){
+  await backendAs(u,raw,true);
+  await userRef(u).set(d);
+  await backend.claim(u);
+}
 async function signIn(username,password,remember){
-  const u=normUser(username), snap=await userRef(u).get();
-  if(!snap.exists) throw new Error('Wrong username or password');
-  const d=snap.data();
+  const u=normUser(username); let snap=await userRef(u).get(), d, held=false;
+  if(snap.exists) d=snap.data(); else { d=await heldAccount(u); held=!!d; }
+  if(!d) throw new Error('Wrong username or password');
   let raw; try{ raw=await unseal(await kek(password,unb64(d.salt),d.iter||ITER),d.wrap); }catch(e){ throw new Error('Wrong username or password'); }
+  if(held) await claimHeld(u,d,raw); else
   await backendAs(u,raw);
   await setSignedIn({id:d.acct,username:u,name:d.name||u},raw,remember);
 }
 async function signUp(username,name,password,seedState,remember){
   const u=normUser(username);
   if(!USER_RE.test(u)) throw new Error('Username: 3–20 letters, numbers, dots or underscores');
-  if((await userRef(u).get()).exists) throw new Error('That username is taken');
+  if((await userRef(u).get()).exists||await heldAccount(u)) throw new Error('That username is taken');
   const raw=rnd(32), salt=rnd(16), rsalt=rnd(16), rc=newRecovery(), acct='a'+Date.now().toString(36)+b64(rnd(6)).replace(/[^a-zA-Z0-9]/g,'').slice(0,6).toLowerCase();
   const wrap=await seal(await kek(password,salt,ITER),raw), rwrap=await seal(await kek(normRecovery(rc),rsalt,ITER),raw);
   const nm=String(name||'').trim().slice(0,30)||u;
@@ -227,9 +239,11 @@ async function signUp(username,name,password,seedState,remember){
 }
 async function recover(username,code,newPassword,remember){
   const u=normUser(username), snap=await userRef(u).get();
-  if(!snap.exists) throw new Error('Wrong username or recovery code');
-  const d=snap.data(); let raw;
+  let d, held=false; if(snap.exists) d=snap.data(); else { d=await heldAccount(u); held=!!d; }
+  if(!d) throw new Error('Wrong username or recovery code');
+  let raw;
   try{ raw=await unseal(await kek(normRecovery(code),unb64(d.rsalt),d.iter||ITER),d.rwrap); }catch(e){ throw new Error('Wrong username or recovery code'); }
+  if(held) await claimHeld(u,d,raw); else
   await backendAs(u,raw);
   const salt=rnd(16); await userRef(u).update({salt:b64(salt),iter:ITER,wrap:await seal(await kek(newPassword,salt,ITER),raw)});
   await setSignedIn({id:d.acct,username:u,name:d.name||u},raw,remember);
