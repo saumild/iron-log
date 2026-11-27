@@ -28,15 +28,23 @@ $$;
 revoke all on function private.il_owns_acct(text) from public, anon;
 grant execute on function private.il_owns_acct(text) to authenticated;
 
+-- helper: is the caller a member of crew group <gid>?  (crews: ilgrp/<gid>/m/<acct>/…)
+create or replace function private.il_in_group(gid text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.docs d where d.parent = 'ilgrp/' || gid || '/m' and d.owner = auth.uid());
+$$;
+revoke all on function private.il_in_group(text) from public, anon;
+grant execute on function private.il_in_group(text) to authenticated;
+
 -- READ -----------------------------------------------------------------------
 -- username directory: needed before sign-in (holds only salts + wrapped keys, never secrets)
 drop policy if exists docs_read_users on public.docs;
 create policy docs_read_users on public.docs for select to anon, authenticated
   using (parent = 'ilusers');
--- Crew is visible to every signed-in member
+-- a crew (private group) is visible only to its members; the group id is the invite secret
 drop policy if exists docs_read_crew on public.docs;
 create policy docs_read_crew on public.docs for select to authenticated
-  using (parent = 'ilcrew' or parent like 'ilcrew/%');
+  using (parent like 'ilgrp/%' and private.il_in_group(split_part(path,'/',2)));
 -- everything else: only the owner
 drop policy if exists docs_read_own on public.docs;
 create policy docs_read_own on public.docs for select to authenticated
@@ -49,11 +57,10 @@ create policy docs_insert on public.docs for insert to authenticated
     owner = auth.uid() and (
          parent = 'ilusers'                                              -- claim a username
       or parent = 'ilacct'                                               -- create my account record
-      or (parent like 'ilacct/%/data'  and private.il_owns_acct(split_part(path,'/',2)))
+      or (parent like 'ilacct/%/data' and private.il_owns_acct(split_part(path,'/',2)))
       or (parent = 'data/users/' || auth.uid()::text)                    -- my private backup space
-      or (parent = 'ilcrew'            and private.il_owns_acct(split_part(path,'/',2)))   -- my member card
-      or (parent like 'ilcrew/%/posts' and private.il_owns_acct(split_part(path,'/',2)))   -- my posts
-      or parent ~ '^ilcrew/[^/]+/(likes|comments|nudges)$'               -- interact with others
+      or (path ~ '^ilgrp/[a-z0-9]{20,40}/m/[^/]+(/(posts|likes|comments|nudges)/[^/]+)?$'
+          and private.il_owns_acct(split_part(path,'/',4)))              -- crews: only under my own account
     ));
 drop policy if exists docs_update on public.docs;
 create policy docs_update on public.docs for update to authenticated
