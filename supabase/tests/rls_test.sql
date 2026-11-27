@@ -35,6 +35,7 @@ begin
   begin insert into docs(path,parent,data) values ('ilusers/anon','ilusers','{}'); r:='ALLOWED'; exception when others then r:='denied'; end; insert into rls_results values (20,'anon writes (expect denied)', r);
   reset role;
   delete from auth.users where id in (a,b);
+  select count(*) into c from docs where path like 'ilusers/rls%' or path like 'ilacct/acctA%'; insert into rls_results values (21,'cleanup (expect 0)', c::text);
 end $$;
 select n, test, result from rls_results order by n;
 
