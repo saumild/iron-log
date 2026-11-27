@@ -133,8 +133,10 @@ export async function launch() { return chromium.launch(); }
 export async function device(browser, srv, { fakeSb = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, acceptDownloads: true });
   if (fakeSb) await ctx.addInitScript(FAKE_CLIENT);
+  else await ctx.addInitScript(`Object.defineProperty(window, 'IRONLOG_CONFIG', { value: { supabaseUrl: '', supabaseAnonKey: '' }, writable: false, configurable: false });`);
   const pg = await ctx.newPage();
   await pg.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  await pg.route(/supabase\.co/, r => r.abort());   // tests never touch the real project
   pg.errors = [];
   pg.on('pageerror', e => pg.errors.push('pageerror: ' + e.message));
   pg.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED|net::|Failed to load resource|row-level security|persist failed/.test(m.text()) && !(!srv.swExists && /fetching the script/.test(m.text()))) pg.errors.push('console: ' + m.text()); });

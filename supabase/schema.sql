@@ -17,11 +17,16 @@ create index if not exists docs_parent_idx on public.docs (parent);
 
 alter table public.docs enable row level security;
 
--- helper: does the caller own Iron Log account <acct>?
-create or replace function public.il_owns_acct(acct text) returns boolean
-language sql stable security definer set search_path = public as $$
+-- helper: does the caller own Iron Log account <acct>?  Lives in a schema the API does not expose.
+create schema if not exists private;
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated;
+create or replace function private.il_owns_acct(acct text) returns boolean
+language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.docs d where d.path = 'ilacct/' || acct and d.owner = auth.uid());
 $$;
+revoke all on function private.il_owns_acct(text) from public, anon;
+grant execute on function private.il_owns_acct(text) to authenticated;
 
 -- READ -----------------------------------------------------------------------
 -- username directory: needed before sign-in (holds only salts + wrapped keys, never secrets)
@@ -44,10 +49,10 @@ create policy docs_insert on public.docs for insert to authenticated
     owner = auth.uid() and (
          parent = 'ilusers'                                              -- claim a username
       or parent = 'ilacct'                                               -- create my account record
-      or (parent like 'ilacct/%/data'  and public.il_owns_acct(split_part(path,'/',2)))
+      or (parent like 'ilacct/%/data'  and private.il_owns_acct(split_part(path,'/',2)))
       or (parent = 'data/users/' || auth.uid()::text)                    -- my private backup space
-      or (parent = 'ilcrew'            and public.il_owns_acct(split_part(path,'/',2)))   -- my member card
-      or (parent like 'ilcrew/%/posts' and public.il_owns_acct(split_part(path,'/',2)))   -- my posts
+      or (parent = 'ilcrew'            and private.il_owns_acct(split_part(path,'/',2)))   -- my member card
+      or (parent like 'ilcrew/%/posts' and private.il_owns_acct(split_part(path,'/',2)))   -- my posts
       or parent ~ '^ilcrew/[^/]+/(likes|comments|nudges)$'               -- interact with others
     ));
 drop policy if exists docs_update on public.docs;
