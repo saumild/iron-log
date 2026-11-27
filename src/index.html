@@ -1,0 +1,140 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style><!--@inline css/style-0.css--></style></head><body>
+<title>Iron Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style><!--@inline css/style-1.css--></style>
+<div class="topbar" id="topbar"><span id="topT">Today</span></div>
+<header id="hdr">
+  <div class="hdrow"><span class="heyebrow" id="hEyebrow"></span><span class="hbrand">Iron<i>/</i>Log</span></div>
+  <h1 class="htitle" id="hTitle">Today</h1>
+  <div class="gstrip" id="gstrip">
+    <div class="lv">
+      <div class="lvrow"><span class="lvn" id="lvN">LV 1</span><span class="lvt" id="lvT">Fresh Start</span></div>
+      <div class="xpbar"><i id="xpFill" style="width:0%"></i></div>
+    </div>
+    <div class="gpill" id="weekRing">0/4</div>
+    <div class="gpill flame" id="strk">🔥 0</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="storeBanner"></div>
+
+  <div id="viewTrain">
+  </div>
+
+  <div id="viewCoach" class="viewhide">
+    <div class="vtitle">Coach</div>
+    <div class="vsub">Your rule-based progression coach runs automatically. The AI coach reads your whole history, profile, and photos for deeper personalized changes.<span id="bridgeNote"></span></div>
+    <div class="coach" id="coach"></div>
+    <button class="aibtn" id="aiBtn">🧠 AI Coach — analyze my progress</button>
+    <div id="aiLast"></div>
+  </div>
+
+  <div id="viewStats" class="viewhide"><div class="vtitle">Stats</div><div id="statsBody"></div></div>
+
+  <div id="viewCrew" class="viewhide"><div class="vtitle">Crew</div><div id="crewBody"></div></div>
+
+  <div id="viewYou" class="viewhide">
+    <div class="vtitle">You</div>
+    <div class="vsub">Everything here personalizes the AI coach. It’s saved, encrypted, in your Iron Log account.</div>
+    <div id="acctCard"></div>
+    <div id="healthCard"></div>
+    <div class="pf">
+      <div class="pfield full"><label>Units</label><select id="pfUnits"><option value="lb">lb · inches</option><option value="kg">kg · cm</option></select></div>
+      <div class="pfield"><label>Age</label><input id="pfAge" inputmode="numeric" placeholder="—"></div>
+      <div class="pfield"><label>Height</label><input id="pfHt" placeholder="e.g. 5'10&quot;"></div>
+      <div class="pfield"><label>Sex</label><select id="pfSex"><option value="">—</option><option>Male</option><option>Female</option><option>Other</option></select></div>
+      <div class="pfield"><label>Goal</label><select id="pfGoal"><option value="">—</option><option>Build muscle</option><option>Strength</option><option>Lose fat, keep muscle</option><option>General fitness</option></select></div>
+      <div class="pfield full"><label>Injuries / limitations</label><input id="pfInj" placeholder="e.g. right shoulder clicks on presses"></div>
+      <div class="pfield full"><label>Anything else the coach should know</label><textarea id="pfNotes" placeholder="e.g. desk job, poor sleep on weekdays, hate lunges"></textarea></div>
+    </div>
+    <button class="mobbtn" id="pfSave" style="margin-bottom:18px">Save profile</button>
+    <div class="achead">Weekly check-in</div>
+    <div class="pf">
+      <div class="pfield"><label id="ciWtLbl">Bodyweight (lb)</label><input id="ciWt" inputmode="decimal" placeholder="—"></div>
+      <div class="pfield"><label>Progress photo</label><button class="dbtn" id="ciPhotoBtn" style="width:100%;height:41px">＋ Add photo</button></div>
+      <div class="pfield full"><label>Note (energy, sleep, soreness…)</label><input id="ciNote" placeholder="optional"></div>
+    </div>
+    <button class="mobbtn" id="ciSave" style="margin-bottom:14px">Log this week's check-in</button>
+    <div id="ciList"></div>
+    <div class="gnote">Photos are compressed and stored only on this device. They're sent to the AI only when you run an analysis. Physique change is slow — the coach reads trends over weeks, not days.</div>
+    <div class="achead" style="margin-top:16px">Your data</div>
+    <div id="storeWarn"></div>
+    <div class="dbtns">
+      <button class="dbtn" id="expBtn">⬇ Back up</button>
+      <button class="dbtn" id="impBtn">⬆ Restore</button>
+    </div>
+    <div class="dbtns" style="margin-top:8px">
+      <button class="dbtn" id="copyBtn">📋 Copy backup</button>
+      <button class="dbtn" id="pasteBtn">📥 Paste backup</button>
+    </div>
+    <textarea id="bkBox" class="brbox" placeholder="Paste a backup here, then tap Paste backup"></textarea>
+    <div id="storeDiag"></div>
+    <div class="gnote">Back up before clearing browser data or switching phones.</div>
+    <input type="file" id="impFile" accept="application/json" style="display:none">
+  </div>
+  <div class="foot">
+    Tap any exercise name for its records, how-to video and AI form check.<br>
+    Your log is saved on this device. Crew shares only what you post, with friends you accept.
+  </div>
+</div>
+
+<nav class="bnav">
+  <button class="nbtn active" data-view="train" aria-label="Train"><span class="ni"><svg viewBox="0 0 24 24"><path d="M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12"/></svg></span><span class="nl">Train</span></button>
+  <button class="nbtn" data-view="coach" aria-label="Coach"><span class="ni"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span><span class="nl">Coach</span></button>
+  <button class="nbtn" data-view="stats" aria-label="Stats"><span class="ni"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg></span><span class="nl">Stats</span></button>
+  <button class="nbtn" data-view="crew" aria-label="Crew"><span class="ni"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M16 5.2a3 3 0 010 5.6M17.5 14.6c1.6.6 2.6 2 3 4.4"/></svg></span><span class="nl">Crew</span><span class="nbadge" id="crewBadge"></span></button>
+  <button class="nbtn" data-view="you" aria-label="You"><span class="ni"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/></svg></span><span class="nl">You</span></button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<div class="scrim" id="scrim">
+  <div class="sheet" id="sheet">
+    <div class="grab"></div>
+    <div class="rv-head"><div class="ttl" id="rvTtl">Session review</div><div class="dt" id="rvDt"></div></div>
+    <div class="rv-verdict" id="rvVerdict"></div>
+    <div id="rvXp"></div>
+    <div class="achead">How did it feel?</div>
+    <div class="feelrow" id="feelRow"></div>
+    <div class="rv-stats" id="rvStats"></div>
+    <div class="rv-list" id="rvList"></div>
+    <div id="rvShare"></div>
+    <button class="rv-close" id="rvClose">Done</button>
+  </div>
+</div>
+
+<div class="scrim" id="aiScrim">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="rv-head"><div class="ttl" id="aiTtl">AI Coach</div><div class="dt" id="aiDt"></div></div>
+    <div id="aiBody"></div>
+    <div class="ai-foot">Suggestions are generated by AI from your logs — they're a starting point, not a prescription. Trust how your body feels over any recommendation, and skip anything that causes pain.</div>
+    <button class="rv-close" id="aiClose">Done</button>
+  </div>
+</div>
+
+<div class="scrim" id="crewScrim">
+  <div class="sheet" id="crewSheet"></div>
+</div>
+
+<input type="file" id="ciFile" accept="image/*" style="display:none">
+<input type="file" id="fcFile" accept="video/*" style="display:none">
+<input type="file" id="fcImgFile" accept="image/*" multiple style="display:none">
+<script><!--@inline js/auth.js--></script>
+
+<script><!--@inline js/app.js--></script>
+<script><!--@inline js/exercises.js--></script>
+<script><!--@inline js/workout.js--></script>
+<script><!--@inline js/planner.js--></script>
+<script><!--@inline js/progress.js--></script>
+<script><!--@inline js/crew-artifact.js--></script>
+<script><!--@inline js/social.js--></script>
+<script><!--@inline js/health.js--></script>
+
+<script><!--@inline js/nav-v2.js--></script>
+
+
+</body></html>
