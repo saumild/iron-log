@@ -1,4 +1,7 @@
-/* js/auth.js — Iron Log accounts (inside Claude).
+/* js/auth.js — Iron Log accounts.
+   Standalone build: storage comes from js/platform.js (Supabase or this device). Before any account
+   data is read or written, backend.authAs() signs this browser in to the backend as that account,
+   using a secret derived from the account's data key (never the password).
    History, XP, streaks, records, check-ins, photos, plans and settings belong to an Iron Log
    account, not to whichever Claude account opens the page.
 
@@ -15,7 +18,7 @@
       so "stay signed in" lives on the device, one entry per Iron Log account — see devProfiles)
      ilbak-<acct>-m / -c<i>    a private copy of the same ciphertext, in case the shared copy is lost */
 (function(){
-if(!(typeof window!=='undefined'&&window.claude&&typeof window.claude.use==='function')) return;
+if(!(typeof window!=='undefined'&&window.ironPlatform&&typeof window.ironPlatform.use==='function')) return;
 const te=new TextEncoder(), td=new TextDecoder();
 const ITER=310000, CHUNK=100000;
 const b64=buf=>{ const a=buf instanceof Uint8Array?buf:new Uint8Array(buf); let s=''; for(let i=0;i<a.length;i+=0x8000) s+=String.fromCharCode.apply(null,a.subarray(i,i+0x8000)); return btoa(s); };
@@ -35,14 +38,13 @@ const RC_ALPHA='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newRecovery=()=>{ const b=rnd(20); let s=''; for(let i=0;i<20;i++){ s+=RC_ALPHA[b[i]%RC_ALPHA.length]; if(i%5===4&&i<19) s+='-'; } return s; };
 const normRecovery=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 
-let db=null, cid=null, ready=null;
+let db=null, cid=null, ready=null, backend=null;
 const A={acct:null, dek:null, dekRaw:null};
 function init(){
   return ready||(ready=(async()=>{
-    const [d,u]=await Promise.all([window.claude.use('db'),window.claude.use('user')]);
-    if(!d||!u) return false;
-    const id=await u.id(); if(!id) return false;
-    db=d; cid=id; return true;
+    const [d,u,b]=await Promise.all([window.ironPlatform.use('db'),window.ironPlatform.use('user'),window.ironPlatform.use('auth')]);
+    if(!d||!u||!b) return false;
+    db=d; backend=b; cid=await u.id(); return true;
   })().catch(()=>false));
 }
 const userRef=u=>db.doc('ilusers/'+u);
@@ -97,6 +99,10 @@ addEventListener('pagehide',()=>{ flushBackup(); });
 const DEV_KEY='ironlog-profiles';
 function devGet(){ try{ const r=JSON.parse(localStorage.getItem(DEV_KEY)||'null'); if(r&&r.list&&typeof r.list==='object') return r; }catch(e){} return {last:null,list:{}}; }
 function devPut(v){ try{ localStorage.setItem(DEV_KEY,JSON.stringify(v)); }catch(e){} }
+async function backendAs(username,raw,create){
+  await backend.authAs(username,raw,!!create);
+  try{ cid=await (await window.ironPlatform.use('user')).id(); }catch(e){}
+}
 async function setSignedIn(acct,raw,remember){
   A.acct=acct; A.dekRaw=raw; A.dek=await dekKey(raw);
   const dv=devGet();
@@ -107,6 +113,7 @@ async function openRemembered(id){
   const dv=devGet(), d=dv.list[id]; if(!d) return false;
   try{
     const u=await userRef(d.username).get();
+    if(u.exists&&u.data().acct===id) await backendAs(d.username,unb64(d.dek));
     if(!u.exists||u.data().acct!==id){ delete dv.list[id]; if(dv.last===id) dv.last=null; devPut(dv); return false; }
     await setSignedIn({id,username:d.username,name:u.data().name||d.name||d.username},unb64(d.dek),false);
     return true;
@@ -125,6 +132,7 @@ async function signIn(username,password,remember){
   if(!snap.exists) throw new Error('Wrong username or password');
   const d=snap.data();
   let raw; try{ raw=await unseal(await kek(password,unb64(d.salt),d.iter||ITER),d.wrap); }catch(e){ throw new Error('Wrong username or password'); }
+  await backendAs(u,raw);
   await setSignedIn({id:d.acct,username:u,name:d.name||u},raw,remember);
 }
 async function signUp(username,name,password,seedState,remember){
@@ -134,6 +142,7 @@ async function signUp(username,name,password,seedState,remember){
   const raw=rnd(32), salt=rnd(16), rsalt=rnd(16), rc=newRecovery(), acct='a'+Date.now().toString(36)+b64(rnd(6)).replace(/[^a-zA-Z0-9]/g,'').slice(0,6).toLowerCase();
   const wrap=await seal(await kek(password,salt,ITER),raw), rwrap=await seal(await kek(normRecovery(rc),rsalt,ITER),raw);
   const nm=String(name||'').trim().slice(0,30)||u;
+  await backendAs(u,raw,true);
   await userRef(u).set({acct,name:nm,salt:b64(salt),iter:ITER,wrap,rsalt:b64(rsalt),rwrap,created:Date.now()});
   await acctRef(acct).set({name:nm,username:u,created:Date.now()});
   await setSignedIn({id:acct,username:u,name:nm},raw,remember);
@@ -145,6 +154,7 @@ async function recover(username,code,newPassword,remember){
   if(!snap.exists) throw new Error('Wrong username or recovery code');
   const d=snap.data(); let raw;
   try{ raw=await unseal(await kek(normRecovery(code),unb64(d.rsalt),d.iter||ITER),d.rwrap); }catch(e){ throw new Error('Wrong username or recovery code'); }
+  await backendAs(u,raw);
   const salt=rnd(16); await userRef(u).update({salt:b64(salt),iter:ITER,wrap:await seal(await kek(newPassword,salt,ITER),raw)});
   await setSignedIn({id:d.acct,username:u,name:d.name||u},raw,remember);
 }
@@ -157,6 +167,7 @@ async function signOut(){
   try{ if(typeof persist==='function'&&typeof bootLoaded!=='undefined'&&bootLoaded) await persist(); }catch(e){}
   await flushBackup(); await chain.catch(()=>{});
   const dv=devGet(); if(A.acct) delete dv.list[A.acct.id]; dv.last=null; devPut(dv);
+  await backend.signOut();
   location.reload();
 }
 /* back to the profile list, keeping this profile remembered on the device */
@@ -164,6 +175,7 @@ async function switchProfile(){
   try{ if(typeof persist==='function'&&typeof bootLoaded!=='undefined'&&bootLoaded) await persist(); }catch(e){}
   await flushBackup(); await chain.catch(()=>{});
   const dv=devGet(); dv.last=null; devPut(dv);
+  await backend.signOut();
   location.reload();
 }
 /* history already in this Claude account from before Iron Log accounts (offered at sign-up) */
@@ -223,7 +235,7 @@ function showGate(mode,msg){
   const fb=gate.querySelector('#ilForgot'); if(fb) fb.onclick=()=>showGate('forgot');
   const bb=gate.querySelector('#ilBack'); if(bb) bb.onclick=()=>showGate('in');
   if(mode==='up') claudeCopy().then(c=>{ const el=gate&&gate.querySelector('#ilImp'); if(c&&c.n&&el){ gate._seed=c;
-    el.innerHTML=`<label class="ila-chk imp"><input type="checkbox" id="ilSeed"> Import ${c.n} older workout${c.n===1?'':'s'} saved in this Claude account. They may belong to someone else who uses this Claude account, so tick only if they’re yours.</label>`; } });
+    el.innerHTML=`<label class="ila-chk imp"><input type="checkbox" id="ilSeed"> Import ${c.n} older workout${c.n===1?'':'s'} saved here before Iron Log accounts. Tick only if they’re yours.</label>`; } });
   const go=gate.querySelector('#ilGo'), err=gate.querySelector('#ilErr');
   const val=id=>{ const x=gate.querySelector('#'+id); return x?x.value:''; };
   gate.querySelectorAll('input').forEach(i=>i.addEventListener('keydown',e=>{ if(e.key==='Enter') go.click(); }));

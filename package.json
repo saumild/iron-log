@@ -7,7 +7,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "python3 tools/build.py && node tests/smoke.spec.mjs",
+    "test": "python3 tools/build.py && node tests/smoke.spec.mjs && node tests/accounts.spec.mjs",
     "build": "python3 tools/build.py"
   },
   "keywords": [],
@@ -17,5 +17,8 @@
     "playwright": "^1.63.0"
   },
   "private": "true",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.2"
+  }
 }

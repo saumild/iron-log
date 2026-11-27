@@ -64,15 +64,20 @@ async function probeIdb(){
 let primaryTier=null;      // 'local' | 'idb' | 'claude' | null
 let legacyTiers=[];        // readable tiers that are not primary (adoption only)
 let bootLoaded=false;      // gate: no writes until load() completes
+/* multi-device safety: remember what was last loaded/saved, so closing the app never re-saves an
+   unchanged (possibly stale) copy over newer data written from another device */
+let cleanSig=null, cleanAt='';
+const sigOf=s=>{ try{ const {savedAt,...rest}=s||{}; return JSON.stringify(rest); }catch(e){ return null; } };
+function markClean(){ cleanSig=sigOf(state); cleanAt=String((state&&state.savedAt)||''); }
 /* Running as a Claude artifact (claude.ai viewer): browser storage there can come back empty,
    so the durable copy lives in the viewer's own private `db` subtree, chunked under the
    256 KiB document limit. Everywhere else (the Netlify site, local dev) this tier never probes. */
-const HOSTED=typeof window!=='undefined'&&!!(window.claude&&typeof window.claude.use==='function');
+const HOSTED=typeof window!=='undefined'&&!!(window.ironPlatform&&typeof window.ironPlatform.use==='function');
 const CDB_CHUNK=100000;                 // chars per document; JSON escaping + UTF-8 stay under 256 KiB
 let cdb=null, cuid=null, cdbChain=Promise.resolve();
 async function probeCdb(){
   if(!HOSTED) throw new Error('not hosted');
-  const [db,user]=await Promise.all([window.claude.use('db'),window.claude.use('user')]);
+  const [db,user]=await Promise.all([window.ironPlatform.use('db'),window.ironPlatform.use('user')]);
   if(!db||!user) throw new Error('db unavailable');
   const id=await user.id(); if(!id) throw new Error('signed out');
   cdb=db; cuid=id;
@@ -476,6 +481,7 @@ async function load(){
   // keep the week number in sync with the real calendar on every load
   const wk=weekFromDate(todayStr());
   state.settings.week=(Number.isFinite(wk)&&wk>0)?wk:1;
+  markClean();
 }
 let saveTimer=null;
 let persistBroken=false;
@@ -485,6 +491,7 @@ async function persist(){
     state.savedAt=new Date().toISOString();
     autoBackupText=JSON.stringify(state);
     await writeRaw(JSON.stringify(state));
+    markClean();
     if(persistBroken){ persistBroken=false; renderStorageBanner(); }
     return true;
   }catch(e){
@@ -501,6 +508,7 @@ function flush(){
   if(!bootLoaded) return;                       // BUG-1 fix: never flush the boot state
   try{
     if((state.logs||[]).length===0) return;     // BUG-2 fix: an empty flush has nothing worth risking a wipe for
+    if(cleanSig!==null&&sigOf(state)===cleanSig) return;   // nothing changed: don't overwrite newer data from another device
     state.savedAt=new Date().toISOString();
     const v=JSON.stringify(state);
     try{ if(primaryTier==='local') window.localStorage.setItem(KEY,v); }catch(e){}
@@ -509,7 +517,17 @@ function flush(){
 }
 window.addEventListener('pagehide',flush);
 window.addEventListener('beforeunload',flush);
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flush(); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flush(); else pickUpRemote(); });
+/* back in the foreground: if another device saved newer data and nothing here is unsaved, reload to show it */
+async function pickUpRemote(){
+  try{
+    if(!bootLoaded||!window.ironPlatform||ironPlatform.backend!=='supabase'||!(window.IronAuth&&IronAuth.acct)) return;
+    if(cleanSig===null||sigOf(state)!==cleanSig) return;
+    const raw=await IronAuth.readState(); if(!raw) return;
+    const at=String((JSON.parse(raw)||{}).savedAt||'');
+    if(at&&at>cleanAt) location.reload();
+  }catch(e){}
+}
 
 /* ---------- helpers ---------- */
 /* working sets = everything except warm-ups */
@@ -871,7 +889,7 @@ async function offerDeviceImport(){
 async function exportData(){
   const json=JSON.stringify(state,null,2), filename='iron-log-backup-'+todayStr()+'.json';
   if(HOSTED){
-    const dl=await window.claude.use('downloads').catch(()=>null);
+    const dl=await window.ironPlatform.use('downloads').catch(()=>null);
     if(!dl){ toast('Downloads aren’t available here — use Copy backup'); return; }
     try{ const r=await dl.save({filename,data:json}); if(r&&r.status==='saved') toast('Backup saved'); }
     catch(e){ if(e&&e.code!=='cancelled'&&e.code!=='declined') toast('Couldn’t save — use Copy backup'); }
@@ -1192,7 +1210,7 @@ let API_AVAILABLE = (typeof window!=='undefined') && /(^|\.)claude\.(ai|com)$/.t
 let claudeSample=null;
 async function initSample(){
   if(!HOSTED) return;
-  try{ const fn=await window.claude.use('sample'); if(fn){ claudeSample=fn; API_AVAILABLE=true; } }catch(e){}
+  try{ const fn=await window.ironPlatform.use('sample'); if(fn){ claudeSample=fn; API_AVAILABLE=true; } }catch(e){}
 }
 function b64ToBlob(b64,type){ const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new Blob([u],{type}); }
 async function askAI(content,maxTokens){

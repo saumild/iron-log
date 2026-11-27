@@ -31,7 +31,7 @@ const avatarOk=a=>AVATARS.includes(a)?a:'🏋️';
 function init(){
   return ready||(ready=(async()=>{
     // Crew identity is the signed-in Iron Log account, never the Claude account
-    const d=await window.claude.use('db'); const acc=window.IronAuth&&IronAuth.acct;
+    const d=await window.ironPlatform.use('db'); const acc=window.IronAuth&&IronAuth.acct;
     if(!d||!acc){ ready=null; return false; }
     db=d; uid=acc.id; return true;
   })().catch(()=>{ ready=null; return false; }));
