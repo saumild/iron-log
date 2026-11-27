@@ -585,6 +585,7 @@ const planKind=()=>['yoga','home'].includes(state.settings.planKind)?state.setti
 const HOME_IDS=new Set(['pushup','wide_push','diamond_push','pike_push','superman','snow_angel','ytw','bw_squat','bw_lunge','bw_split','jump_squat','lat_lunge','skater',
   'sl_bridge','glute_bridge','sl_rdl_bw','calf_bw','sissy','burpee','plank','sideplank','deadbug','birddog','crunch','rev_crunch','hollow','mtn_climber','shoulder_tap']);
 const homeOk=e=>HOME_IDS.has(e.id);
+window.IronHomeIds=HOME_IDS;   // read by health.js to label bodyweight sessions for Apple Health
 function homePlan(p){
   p.kind='home'; p.title=('Home · '+String(p.title||'Workout').replace(/^Home · /,'')).slice(0,40);
   p.warmup=p.warmup||'3 min: jumping jacks, arm circles, bodyweight squats';

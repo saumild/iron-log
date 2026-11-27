@@ -6,6 +6,37 @@
    state.health = {weight:{ymd:lb}, steps:{ymd:n}, rhr:{ymd:bpm}, sleep:{ymd:hours}, workouts:[{d,name,min}], lastImport} */
 (function(){
 const KEEP_DAYS=400;
+/* ---------- hands-free import: the Shortcut opens  <app>#k=<device key>&health=<url-encoded export>
+   The #fragment never leaves the phone (browsers don't send it to the server). The key lives in the
+   (encrypted, synced) account, so it matches in Safari and in the Home Screen app — iOS keeps their storage
+   apart, and a shortcut's Open URLs lands in Safari. With the key the import runs straight away; without it
+   (or from an unknown link) Iron Log asks first. */
+function deviceKey(){
+  const st=state.settings||(state.settings={});
+  if(!st.healthKey){ const a=crypto.getRandomValues(new Uint8Array(12)); st.healthKey=[...a].map(b=>'abcdefghijkmnpqrstuvwxyz23456789'[b%32]).join(''); try{ persist(); }catch(e){} }
+  return st.healthKey;
+}
+let fromLink=null;
+function grabLink(){
+  const h=String(location.hash||''); if(!/(^#|&)health=/.test(h)) return false;
+  const kv={}; h.slice(1).split('&').forEach(p=>{ const i=p.indexOf('='); if(i>0){ try{ kv[p.slice(0,i)]=decodeURIComponent(p.slice(i+1).replace(/\+/g,'%20')); }catch(e){ kv[p.slice(0,i)]=''; } } });
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  if(!kv.health) return false;
+  fromLink={text:kv.health,key:kv.k||''}; return true;
+}
+grabLink();
+async function runLinkImport(){
+  if(!fromLink) return;
+  if(!(window.IronAuth&&IronAuth.acct)&&typeof state!=='object') return;
+  const {text,key}=fromLink; fromLink=null;
+  const mine=(state.settings&&state.settings.healthKey)||'';
+  if(!(mine&&key===mine)){
+    const ok=typeof ask==='function'?await ask('Import Apple Health data from this link? Only do this if it came from your own Iron Log Health shortcut.','Import'):true;
+    if(!ok) return;
+  }
+  try{ await importText(text); }catch(e){ toast('Couldn’t read the Apple Health data — '+e.message); }
+}
+addEventListener('hashchange',()=>{ if(grabLink()) Promise.resolve(window.appReady).then(runLinkImport); });
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad=n=>String(n).padStart(2,'0');
 const ymdOf=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
@@ -181,12 +212,72 @@ function openSetup(){
         <li><b>Sleep Analysis</b>:<div class="hs-line">${LINE('sleep',['Start Date','End Date','Value'])}</div></li>
         <li><b>Exercise Minutes</b>, with <i>Group By</i> <b>Day</b>:<div class="hs-line">${LINE('exercise',['Start Date','Value'])}</div></li>
       </ul></div>
-    <div class="hs-step"><b>2 · Finish the shortcut</b><p>Add a <b>Text</b> block containing your five combined variables, one per line. Then add <b>Copy to Clipboard</b>, and <b>Save File</b> → iCloud Drive / Shortcuts / <b>Iron Log Health.txt</b> with <i>Overwrite</i> on.</p></div>
+    <div class="hs-step"><b>2 · Finish the shortcut — send it to Iron Log</b><p>Add a <b>Text</b> block containing your five combined variables, one per line. Then add <b>URL Encode</b> (Encode the Text), then <b>Text</b> with this link followed by the <i>URL Encoded Text</i> variable, then <b>Open URLs</b>:</p>
+      <div class="hs-line mono" id="hsLink" style="word-break:break-all">${esc(linkPrefix())}<span class="tok">URL Encoded Text</span></div>
+      <button class="dbtn" id="hsCopy" style="width:100%;margin-top:6px">Copy link start</button>
+      <small>The link carries your account’s private import key, so Iron Log imports without asking. It opens in Safari — sign in to Iron Log there once${window.ironPlatform&&ironPlatform.backend==='supabase'?'; your data then syncs to the Home Screen app too':'. This copy keeps data on the device only, so use Iron Log in Safari for this'}. (Optional: also add <b>Save File</b> → iCloud Drive / Shortcuts / <b>Iron Log Health.txt</b> as a backup you can import by hand.)</small></div>
     <div class="hs-step"><b>3 · Make it run every morning</b><p>Shortcuts → <b>Automation</b> → <b>＋</b> → <b>Time of Day</b> → 7:00 AM, Daily → <b>Run Immediately</b> → choose <b>Iron Log Health</b>. If it says “authorization not determined”: Health app → your profile picture → Apps → Shortcuts → Turn On All, then run it again.</p></div>
-    <div class="hs-step"><b>4 · Import</b><p>Open Iron Log → You → <b>Import from Apple Health</b> → paste, or choose the file from iCloud Drive. Your coach and planner use the newest data straight away.</p></div>
+    <div class="hs-step"><b>4 · That’s it</b><p>Each morning the shortcut opens Iron Log and your data comes straight in — no pasting. You can still use <b>Import from Apple Health</b> to paste or pick a file.</p></div>
     <div class="hs-alt"><b>Prefer fully hands-off?</b> The <b>Health Auto Export</b> app (App Store, paid) can save a JSON file to iCloud Drive on a schedule with no shortcut building — Iron Log imports its JSON files too.</div>
     <button class="rv-close" id="hsX" style="margin-top:12px">Done</button>`);
   s.querySelector('#hsX').onclick=closeSheet;
+  s.querySelector('#hsCopy').onclick=async()=>{ try{ await navigator.clipboard.writeText(linkPrefix()); toast('Copied — paste it into the Text block'); }catch(e){ toast('Select the link above and copy it'); } };
+}
+const linkPrefix=()=>location.origin+location.pathname+'#k='+deviceKey()+'&health=';
+/* ---------- Save to Apple Health ----------
+   Web pages can't write HealthKit, but a shortcut can: Iron Log runs the "Iron Log Workout" shortcut
+   (shortcuts://run-shortcut) with the session as JSON {type, start, minutes, kcal, title}; the shortcut's
+   Log Workout action records it in Health, where it counts toward Activity rings. */
+const WO_SHORTCUT='Iron Log Workout';
+const isApple=()=>/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent||'');
+function workoutKind(entry){
+  const ids=Object.keys(entry.ex||{}); if(!ids.length) return 'strength';
+  if(ids.filter(i=>/^yg_/.test(i)).length*2>=ids.length) return 'yoga';
+  if(window.IronHomeIds&&ids.every(i=>IronHomeIds.has(i))) return 'home';
+  return 'strength';
+}
+function latestWeightLb(){
+  const all=[...weights(),...((state.checkins||[]).filter(c=>c&&+c.weight>0).map(c=>({date:c.date,weight:+c.weight})))].filter(x=>x.date&&+x.weight>0).sort((a,b)=>a.date<b.date?1:-1);
+  return all.length?+all[0].weight:null;
+}
+function healthPayload(entry){
+  const kind=workoutKind(entry);
+  const sets=Object.values(entry.ex||{}).reduce((n,a)=>n+(Array.isArray(a)?a.length:0),0);
+  const minutes=entry.duration>0?Math.max(1,Math.round(entry.duration/60)):Math.max(15,Math.min(90,Math.round(sets*2.5)));
+  const startMs=+entry.start>0?+entry.start:new Date(entry.date+'T12:00:00').getTime();
+  const d=new Date(startMs), off=-d.getTimezoneOffset(), pad2=n=>String(Math.abs(n)).padStart(2,'0');
+  const iso=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:00${off>=0?'+':'-'}${pad2(Math.trunc(off/60))}:${pad2(off%60)}`;
+  const lb=latestWeightLb(), met={strength:5,home:4,yoga:2.5}[kind];
+  const kcal=lb?Math.round(met*(lb*0.4536)*(minutes/60)):0;
+  return {type:kind,start:iso,minutes,kcal,title:String(entry.name||'Iron Log workout').slice(0,40)};
+}
+function openShortcut(url){ location.href=url; }
+function sendWorkout(entry){
+  const p=healthPayload(entry);
+  HealthSync._open('shortcuts://run-shortcut?name='+encodeURIComponent(WO_SHORTCUT)+'&input=text&text='+encodeURIComponent(JSON.stringify(p)));
+  const l=(state.logs||[]).find(x=>x.id===entry.id); if(l){ l.hk=Date.now(); persist(); }
+  return p;
+}
+function renderSave(entry){
+  const el=document.getElementById('rvHealth'); if(!el) return;
+  if(!isApple()||!entry||!entry.id){ el.innerHTML=''; return; }
+  const l=(state.logs||[]).find(x=>x.id===entry.id)||entry;
+  el.innerHTML=`<button class="dbtn" id="rvHk" style="width:100%;margin-top:8px">${l.hk?'✓ Sent to Apple Health · send again':'♥ Save to Apple Health'}</button>
+    <button class="linkbtn" id="rvHkHow" style="display:block;margin:6px auto 0">How this works</button>`;
+  el.querySelector('#rvHk').onclick=()=>{ sendWorkout(l); renderSave(l); };
+  el.querySelector('#rvHkHow').onclick=openWorkoutSetup;
+}
+function openWorkoutSetup(){
+  const s=sheet(`<div class="rv-head"><div class="ttl">Save workouts to Apple Health</div></div>
+    <div class="rv-sub">Web apps can’t write to Health directly, so a small shortcut does it. Build it once (about 3 minutes); after that, <b>Save to Apple Health</b> on the workout summary logs the session — it counts toward your Activity rings.</div>
+    <div class="hs-step"><b>1 · Create the shortcut</b><p>Shortcuts app → <b>＋</b> → name it exactly <b>${WO_SHORTCUT}</b>.</p></div>
+    <div class="hs-step"><b>2 · Read what Iron Log sends</b><p>Add <b>Get Dictionary from Input</b> (input: <i>Shortcut Input</i>). Then add four <b>Get Dictionary Value</b> blocks for the keys <code>type</code>, <code>start</code>, <code>minutes</code> and <code>kcal</code>. Add <b>Get Dates from Input</b> on the <i>start</i> value.</p></div>
+    <div class="hs-step"><b>3 · Log the workout</b><p>Add <b>If</b> <i>type</i> is <code>yoga</code> → <b>Log Workout</b> type <b>Yoga</b>. <b>Otherwise</b> → <b>If</b> <i>type</i> is <code>home</code> → <b>Log Workout</b> type <b>Functional Strength Training</b>, <b>Otherwise</b> → <b>Log Workout</b> type <b>Traditional Strength Training</b>.</p>
+      <p>In each Log Workout set <b>Date</b> to the <i>Dates</i> variable, <b>Duration</b> to <i>minutes</i> with the unit <b>min</b>, and <b>Calories</b> to <i>kcal</i>. Leave Distance empty.</p></div>
+    <div class="hs-step"><b>4 · Allow Shortcuts to write to Health</b><p>Health app → your profile → <b>Apps</b> (under Privacy) → <b>Shortcuts</b> → turn on <b>Workouts</b> and <b>Active Energy</b>. Run the shortcut once by hand to grant permission.</p></div>
+    <div class="hs-alt"><b>Calories</b> are an estimate from the session length and your latest weight (from Apple Health or check-ins); they’re 0 until Iron Log knows your weight.</div>
+    <button class="rv-close" id="hwX" style="margin-top:12px">Done</button>`);
+  s.querySelector('#hwX').onclick=closeSheet;
 }
 /* Stats: recovery section */
 function statsHTML(){
@@ -198,8 +289,9 @@ function statsHTML(){
   return body?`<div class="ana-sec"><div class="ana-h">Recovery · Apple Health</div>${body}</div>`:'';
 }
 
-window.HealthSync={parse,merge,importText,summary,weights,renderCard,statsHTML,openImport,openSetup,_t:{parseDate,durSec}};
+window.HealthSync={parse,merge,importText,summary,weights,renderCard,statsHTML,openImport,openSetup,renderSave,openWorkoutSetup,healthPayload,
+  _open:openShortcut,_t:{parseDate,durSec,deviceKey,linkPrefix}};
 /* show the card whenever the You tab renders */
 if(typeof renderYou==='function'){ const base=renderYou; renderYou=function(){ const r=base.apply(this,arguments); try{ renderCard(); }catch(e){} return r; }; }
-Promise.resolve(window.appReady).then(()=>{ try{ renderCard(); }catch(e){} });
+Promise.resolve(window.appReady).then(()=>{ try{ renderCard(); }catch(e){} runLinkImport(); });
 })();

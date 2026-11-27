@@ -129,8 +129,9 @@ export async function startServer(file = 'dist/index.html', { supabase = null } 
 export async function launch() { return chromium.launch(); }
 
 // A "device": its own browser context (separate storage), phone viewport.
-export async function device(browser, srv, { fakeSb = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, acceptDownloads: true });
+export const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1';
+export async function device(browser, srv, { fakeSb = false, ua = null } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, acceptDownloads: true, ...(ua ? { userAgent: ua } : {}) });
   if (fakeSb) await ctx.addInitScript(FAKE_CLIENT);
   else await ctx.addInitScript(`Object.defineProperty(window, 'IRONLOG_CONFIG', { value: { supabaseUrl: '', supabaseAnonKey: '' }, writable: false, configurable: false });`);
   const pg = await ctx.newPage();

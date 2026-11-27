@@ -684,6 +684,7 @@ function showReview(entry, gain){
   $('#rvList').innerHTML=rows;
   renderFeelRow(entry);
   if(window.Social) Social.renderShare(entry);
+  try{ if(window.HealthSync) HealthSync.renderSave(entry); }catch(e){}
   $('#scrim').classList.add('show');
 }
 function closeReview(){$('#scrim').classList.remove('show'); if(window.Social) Social.onReviewClose();}
