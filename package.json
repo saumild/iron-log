@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Workout tracker: strength, yoga and home sessions with your own AI coach, Crew and Apple Health",
   "scripts": {
-    "test": "python3 tools/build.py && node tests/smoke.spec.mjs && node tests/accounts.spec.mjs && node tests/ai.spec.mjs && node tests/crew.spec.mjs && node tests/offline.spec.mjs && node tests/health.spec.mjs",
+    "test": "python3 tools/build.py && node tests/smoke.spec.mjs && node tests/accounts.spec.mjs && node tests/ai.spec.mjs && node tests/crew.spec.mjs && node tests/offline.spec.mjs && node tests/health.spec.mjs && node tests/artifact.spec.mjs",
     "build": "python3 tools/build.py"
   },
   "keywords": [],

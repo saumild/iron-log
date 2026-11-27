@@ -1462,7 +1462,7 @@ $('#fcImgFile').onchange=e=>{ if(e.target.files.length) runFormCheckPhotos(e.tar
 /* PWA: register the service worker so the app opens offline */
 try{
   // offline support wherever the app is served over http(s)
-  if(location.protocol.startsWith('http') && 'serviceWorker' in navigator){
+  if(location.protocol.startsWith('http') && 'serviceWorker' in navigator && !(window.claude&&window.claude.use)){
     window.addEventListener('load',()=>{ try{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){} });
   }
 }catch(e){}

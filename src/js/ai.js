@@ -6,6 +6,8 @@
      openai     OpenAI API      (your key)  POST api.openai.com/v1/chat/completions
      anthropic  Anthropic API   (your key)  POST api.anthropic.com/v1/messages
      gemini     Google Gemini   (your key)  POST generativelanguage.googleapis.com/v1beta/models/<m>:generateContent
+     host       Claude, inside a Claude artifact: the viewer's own Claude plan answers (no key, no extra cost).
+                Only offered when the page runs as an artifact (window.claude 'sample' capability).
 
    The key is stored only in this browser (localStorage 'ironlog-ai'), never in the synced account
    or backups, and is sent only to the provider the person chose.
@@ -13,15 +15,22 @@
    IronAI.sample() returns fn(text,{images:Blob[]}) -> {text}: the same shape app.js already uses. */
 (function(){
 const KEY='ironlog-ai';
+let hostFn=null;     // claude.use('sample') when running as a Claude artifact
+const HOSTED_EMBED=typeof window!=='undefined'&&!!(window.claude&&typeof window.claude.use==='function');
 const PROVIDERS={
+  host:     {label:'Claude — included with your Claude plan', needsKey:false, host:true},
   bridge:   {label:'Copy & paste — any AI app', needsKey:false},
   openai:   {label:'OpenAI (ChatGPT)',  needsKey:true, model:'gpt-5.6-terra',         keyHint:'sk-…',     keyUrl:'https://platform.openai.com/api-keys'},
   anthropic:{label:'Anthropic (Claude)', needsKey:true, model:'claude-sonnet-5-5',    keyHint:'sk-ant-…', keyUrl:'https://console.anthropic.com/settings/keys'},
   gemini:   {label:'Google Gemini',      needsKey:true, model:'gemini-3.5-flash-lite', keyHint:'AIza…',    keyUrl:'https://aistudio.google.com/apikey'},
 };
-function get(){ try{ const v=JSON.parse(localStorage.getItem(KEY)||'null'); if(v&&PROVIDERS[v.provider]) return v; }catch(e){} return {provider:'bridge',key:'',model:''}; }
+const offered=k=>k==='host'?!!hostFn:(HOSTED_EMBED?!PROVIDERS[k].needsKey:true);   // an artifact can't reach other sites, so no API-key providers there
+function get(){
+  try{ const v=JSON.parse(localStorage.getItem(KEY)||'null'); if(v&&PROVIDERS[v.provider]&&offered(v.provider)) return v; }catch(e){}
+  return {provider:hostFn?'host':'bridge',key:'',model:''};
+}
 function put(v){ try{ localStorage.setItem(KEY,JSON.stringify(v)); }catch(e){} }
-const ready=c=>c.provider!=='bridge'&&!!c.key;
+const ready=c=>c.provider!=='bridge'&&(PROVIDERS[c.provider].host?!!hostFn:!!c.key);
 const modelOf=c=>(c.model||'').trim()||PROVIDERS[c.provider].model;
 const blobB64=b=>new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=rej; r.readAsDataURL(b); });
 
@@ -59,23 +68,39 @@ async function call(c,text,images,maxTokens){
   return out;
 }
 
+/* resolves once we know whether a host (Claude artifact) can answer; the app awaits it before choosing copy & paste */
+const hostReady=!HOSTED_EMBED?Promise.resolve():Promise.resolve().then(async()=>{
+  try{ const fn=await window.claude.use('sample'); if(typeof fn==='function') hostFn=fn; }catch(e){}
+});
+async function callHost(text,images){
+  let opts={}; if(images&&images.length){ try{ if((await hostFn.limits()).images) opts.images=images; }catch(e){} }
+  try{ const r=await hostFn(text,opts); const out=String(r&&r.text||'').trim(); if(!out) throw new Error('Claude returned an empty reply'); return out; }
+  catch(e){
+    if(e&&e.code==='not_granted') throw new Error('Allow Claude to answer when asked, then try again');
+    if(e&&e.code==='rate_limited') throw new Error('Claude is busy — wait a minute and try again');
+    throw new Error((e&&e.message)||'Claude couldn’t answer');
+  }
+}
 const IronAI={
-  PROVIDERS, get, set(v){ put(Object.assign(get(),v)); },
+  PROVIDERS, get, hostReady, hosted:HOSTED_EMBED, set(v){ put(Object.assign(get(),v)); },
   ready:()=>ready(get()),
-  name:()=>{ const c=get(); return c.provider==='bridge'?'your AI app':PROVIDERS[c.provider].label.replace(/ \(.*\)/,''); },
+  name:()=>{ const c=get(); return c.provider==='bridge'?'your AI app':c.provider==='host'?'Claude':PROVIDERS[c.provider].label.replace(/ \(.*\)/,''); },
   /* the in-app call, or null in copy & paste mode */
-  sample(){ const c=get(); if(!ready(c)) return null; return async(text,opts)=>({text:await call(c,text,(opts&&opts.images)||[],opts&&opts.maxTokens)}); },
+  sample(){ const c=get(); if(!ready(c)) return null;
+    if(PROVIDERS[c.provider].host) return async(text,opts)=>({text:await callHost(text,(opts&&opts.images)||[])});
+    return async(text,opts)=>({text:await call(c,text,(opts&&opts.images)||[],opts&&opts.maxTokens)}); },
   test:async c=>call(c,'Reply with just the word OK.',[],20),
   renderCard(){
     const el=document.getElementById('aiCard'); if(!el) return;
     const c=get(), p=PROVIDERS[c.provider];
     const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
-    el.innerHTML=`<div class="sh"><b>AI coach</b><small>Works with ChatGPT, Claude, Gemini or any AI</small></div>
-      <div class="pfield"><label>How Iron Log talks to AI</label><select id="aiProv">${Object.entries(PROVIDERS).map(([k,v])=>`<option value="${k}"${k===c.provider?' selected':''}>${esc(v.label)}</option>`).join('')}</select></div>
+    el.innerHTML=`<div class="sh"><b>AI coach</b><small>${HOSTED_EMBED?'Runs on your Claude plan':'Works with ChatGPT, Claude, Gemini or any AI'}</small></div>
+      <div class="pfield"><label>How Iron Log talks to AI</label><select id="aiProv">${Object.entries(PROVIDERS).filter(([k])=>offered(k)).map(([k,v])=>`<option value="${k}"${k===c.provider?' selected':''}>${esc(v.label)}</option>`).join('')}</select></div>
       ${p.needsKey?`<div class="pfield"><label>API key — stored only on this device</label><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${esc(p.keyHint)}" value="${esc(c.key)}"></div>
       <div class="pfield"><label>Model</label><input id="aiModel" spellcheck="false" autocapitalize="none" placeholder="${esc(p.model)}" value="${esc(c.model)}"></div>
       <div class="legend" style="margin:2px 2px 8px">Get a key at <a href="${p.keyUrl}" target="_blank" rel="noopener">${esc(p.keyUrl.replace('https://',''))}</a>. Usage is billed to your own ${esc(p.label.replace(/ \(.*\)/,''))} account. The key is never synced or included in backups.</div>
       <div class="dbtns"><button class="dbtn" id="aiSave">Save</button><button class="dbtn" id="aiTest">Test</button></div>`
+      :p.host?`<div class="legend" style="margin:2px 2px 6px">Plans, yoga flows and coaching are written by Claude right here, using your own Claude plan. No key and no copy &amp; paste. The first time, Claude asks you to allow it.</div>`
       :`<div class="legend" style="margin:2px 2px 6px">When you ask for a plan, a yoga flow or coaching, Iron Log copies a prompt. Paste it into ChatGPT, Claude, Gemini — any AI app — then paste the reply back. No key needed; the app sends nothing itself.</div>`}
       <div class="ila-err" id="aiMsg" style="margin-top:6px"></div>`;
     const msg=(t,ok)=>{ const m=el.querySelector('#aiMsg'); m.textContent=t; m.style.color=ok?'var(--ok, #2f8f4e)':''; };

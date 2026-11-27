@@ -147,10 +147,33 @@ export async function startServer(file = 'dist/index.html', { supabase = null } 
 
 export async function launch() { return chromium.launch(); }
 
+// Stand-in for the Claude artifact host (window.claude.use): db, user, sample, downloads.
+// The database lives in localStorage so a reload keeps it; sample() answers from window.__sampleReply.
+const FAKE_CLAUDE = `(() => {
+  const K = 'fake-claude-db', load = () => { try { return JSON.parse(localStorage.getItem(K) || '{}'); } catch (e) { return {}; } };
+  const save = m => localStorage.setItem(K, JSON.stringify(m));
+  const parentOf = p => p.split('/').slice(0, -1).join('/'), leaf = p => p.split('/').pop();
+  const snap = (p, d) => ({ exists: d != null, id: leaf(p), data: () => JSON.parse(JSON.stringify(d)) });
+  const doc = p => ({ id: leaf(p), get: async () => snap(p, load()[p]), set: async o => { const m = load(); m[p] = o; save(m); },
+    update: async o => { const m = load(); if (m[p] == null) throw new Error('not-found'); m[p] = Object.assign(m[p], o); save(m); },
+    delete: async () => { const m = load(); delete m[p]; save(m); } });
+  const col = (p, ops) => ({ doc: id => doc(p + '/' + id), where: (f, op, v) => col(p, [...ops, ['w', f, v]]), orderBy: (f, d) => col(p, [...ops, ['o', f, d]]), limit: n => col(p, [...ops, ['l', n]]),
+    get: async () => { const m = load(); let rows = Object.keys(m).filter(k => parentOf(k) === p).map(k => ({ path: k, data: m[k] }));
+      for (const [t, a, b] of ops) { if (t === 'w') rows = rows.filter(r => r.data[a] === b); if (t === 'o') rows.sort((x, y) => (x.data[a] > y.data[a] ? 1 : -1) * (b === 'desc' ? -1 : 1)); if (t === 'l') rows = rows.slice(0, a); }
+      return { docs: rows.map(r => snap(r.path, r.data)) }; } });
+  window.__sampleCalls = [];
+  const sample = async (text, opts) => { window.__sampleCalls.push({ text, opts }); return { text: window.__sampleReply || 'OK from Claude' }; };
+  sample.limits = async () => ({ images: true });
+  const caps = { db: { doc, collection: p => col(p, []) }, user: { id: async () => 'artifact-user-1' }, sample,
+    downloads: { save: async o => { window.__downloaded = o; return { status: 'saved' }; } } };
+  Object.defineProperty(window, 'claude', { value: { use: async n => caps[n] || null }, writable: false, configurable: false });
+})();`;
+
 // A "device": its own browser context (separate storage), phone viewport.
 export const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1';
-export async function device(browser, srv, { fakeSb = false, ua = null } = {}) {
+export async function device(browser, srv, { fakeSb = false, fakeClaude = false, ua = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, acceptDownloads: true, ...(ua ? { userAgent: ua } : {}) });
+  if (fakeClaude) await ctx.addInitScript(FAKE_CLAUDE);
   if (fakeSb) await ctx.addInitScript(FAKE_CLIENT);
   else await ctx.addInitScript(`Object.defineProperty(window, 'IRONLOG_CONFIG', { value: { supabaseUrl: '', supabaseAnonKey: '' }, writable: false, configurable: false });`);
   const pg = await ctx.newPage();

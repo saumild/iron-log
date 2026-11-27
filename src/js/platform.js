@@ -12,6 +12,9 @@
      Supabase   when IRONLOG_CONFIG.supabaseUrl + supabaseAnonKey are set (js/config.js).
                 Rows live in public.docs (see supabase/schema.sql); row-level security
                 limits reads/writes. Account data stays end-to-end encrypted by js/auth.js.
+     Artifact   when the page runs inside a Claude artifact (window.claude.use exists): that host's own
+                database/user/downloads. Artifacts can't reach other sites, so Supabase isn't used there.
+                Same API, same encrypted account data; the data lives in the artifact's database.
      Device     otherwise: IndexedDB on this device (localStorage fallback). Same API, no network.
 
    Backend sign-in: Iron Log keeps username + password. The Supabase password is NOT the user's
@@ -108,7 +111,8 @@ function supabaseStore(sb){
 }
 
 /* ---------- assemble ---------- */
-const remote=!!(CFG.supabaseUrl&&CFG.supabaseAnonKey&&window.supabase&&window.supabase.createClient);
+const ARTIFACT=!!(window.claude&&typeof window.claude.use==='function');
+const remote=!ARTIFACT&&!!(CFG.supabaseUrl&&CFG.supabaseAnonKey&&window.supabase&&window.supabase.createClient);
 let sb=null, store, authSvc, userSvc;
 if(remote){
   sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'ironlog-sb-session'}});
@@ -139,13 +143,29 @@ if(remote){
     },
   };
   userSvc={async id(){ const s=(await sb.auth.getSession()).data.session; return s?s.user.id:'anon'; }};
+}else if(ARTIFACT){
+  authSvc={remote:false, async authAs(){ return 'artifact'; }, async signOut(){}, async claim(){ return null; }};
+  userSvc={async id(){ try{ const u=await window.claude.use('user'); return (u&&await u.id())||'anon'; }catch(e){ return 'anon'; } }};
 }else{
   store=deviceStore();
   authSvc={remote:false, async authAs(){ return 'device'; }, async signOut(){}, async claim(){ return null; }};
   userSvc={async id(){ return 'device'; }};
 }
-const db=makeDb(store);
-const downloads={async save({filename,data}){
+/* in an artifact the host's database is used as-is; calls wait for it to be ready */
+function hostDb(){
+  const real=async()=>{ const d=await window.claude.use('db'); if(!d) throw new Error('The Iron Log database isn’t available — sign in to Claude and reopen this page'); return d; };
+  const docRef=p=>({id:leaf(p),path:p,
+    get:()=>real().then(d=>d.doc(p).get()), set:o=>real().then(d=>d.doc(p).set(o)),
+    update:o=>real().then(d=>d.doc(p).update(o)), delete:()=>real().then(d=>d.doc(p).delete())});
+  const col=(p,ops)=>({path:p,
+    doc:id=>docRef(p+'/'+(id==null?rid():id)),
+    where:(...a)=>col(p,[...ops,['where',a]]), orderBy:(...a)=>col(p,[...ops,['orderBy',a]]), limit:(...a)=>col(p,[...ops,['limit',a]]),
+    add:async o=>{ const d=docRef(p+'/'+rid()); await d.set(o); return d; },
+    get:()=>real().then(d=>{ let c=d.collection(p); for(const [m,a] of ops) c=c[m](...a); return c.get(); })});
+  return {doc:docRef, collection:p=>col(p,[])};
+}
+const db=ARTIFACT?hostDb():makeDb(store);
+const downloads=ARTIFACT?{async save(o){ const d=await window.claude.use('downloads'); if(!d) throw new Error('Downloads aren’t available here'); return d.save(o); }}:{async save({filename,data}){
   const url=URL.createObjectURL(new Blob([data],{type:'application/json'}));
   const a=Object.assign(document.createElement('a'),{href:url,download:filename}); document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),4000); return {status:'saved'};
@@ -153,10 +173,10 @@ const downloads={async save({filename,data}){
 const services={db,user:userSvc,auth:authSvc,downloads};
 let devCache=null;
 window.ironPlatform={
-  backend:remote?'supabase':'device',
+  backend:remote?'supabase':ARTIFACT?'artifact':'device',
   /* on-device store (IndexedDB) for the encrypted offline copy of a synced account */
   deviceCache(){ return devCache||(devCache=deviceStore()); },
-  async use(name){ if(name==='sample') return window.IronAI?window.IronAI.sample():null; return services[name]||null; },
+  async use(name){ if(name==='sample'){ if(!window.IronAI) return null; try{ await window.IronAI.hostReady; }catch(e){} return window.IronAI.sample(); } return services[name]||null; },
   _test:{makeDb,applyQuery,supabaseStore,deviceStore},
 };
 })();
