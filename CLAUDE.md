@@ -41,9 +41,9 @@ backup/                 the original single-file Claude artifact this project ca
 
 ## Rules that matter
 - **Edit `src/`, never `dist/`.** `dist/` is generated and git-ignored.
-- **The original names stay.** Some identifiers still say "claude" or "artifact" (`claudeSample`, `askClaude`,
-  `crew-artifact.js`, plan `source:'claude'`) because saved user data depends on them. User-facing text must not
-  assume any one AI. Say "AI" or "ChatGPT, Claude, Gemini or any AI app".
+- **AI-neutral.** User-facing text must not assume any one AI. Say "AI" or "ChatGPT, Claude, Gemini or any AI app".
+  Plans written by an AI are saved with `source:'ai'`. Plans saved by the first version say `'claude'`, and
+  `fromAI()` in planner.js accepts both. Keep that for existing users' data.
 - **Never treat a failed read as "no data."** Every account read and sync confirms the server sign-in first.
   Offline saves stay pending and merge on reconnect. Closing the app only saves real changes (`markClean`/`sigOf` in app.js).
 - **Secrets stay out of synced data.** AI API keys live only in the device's localStorage (`ironlog-ai`),
@@ -53,6 +53,10 @@ backup/                 the original single-file Claude artifact this project ca
 - **Crew privacy:** only members can read a group, and members write only under their own account. Don't add global reads.
 - The service worker never caches Supabase or AI calls.
 - Usernames map to synthetic emails `<username>@users.ironlog.app`. Supabase "Confirm email" must stay off.
+
+## Commits
+- Commits are authored by **Saumil Dedhia** `<32071583+saumild@users.noreply.github.com>`.
+  Don't add AI co-author or session trailers to commit messages or PRs.
 
 ## Deploying
 Pushing to `standalone` (the default branch) runs `.github/workflows/deploy.yml`: test, then build, then GitHub Pages.

@@ -7,7 +7,7 @@
    phaseIdx, weekFromDate, todayStr, computeStats, unlockedSet, ACH, showReview, lineChart, F, toast, $). */
 (function(){
 const LIVE_KEY='ironlog-live';
-/* the unsaved workout belongs to whoever started it — per user in Claude */
+/* the unsaved workout belongs to whoever started it — per account */
 const liveKey=()=>HOSTED?LIVE_KEY+':'+((window.IronAuth&&IronAuth.acct&&IronAuth.acct.id)||'nouser'):LIVE_KEY;
 const h=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const RESTS=[0,30,45,60,75,90,120,150,180,240,300];

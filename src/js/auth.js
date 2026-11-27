@@ -3,7 +3,7 @@
    data is read or written, backend.authAs() signs this browser in to the backend as that account,
    using a secret derived from the account's data key (never the password).
    History, XP, streaks, records, check-ins, photos, plans and settings belong to an Iron Log
-   account, not to whichever Claude account opens the page.
+   account, not to whichever browser or device opens the page.
 
    The page's shared db is readable by everyone the artifact is shared with, so account data is
    end-to-end encrypted:
@@ -13,8 +13,8 @@
      ilacct/<acct>/data/c<i>   {s}                        AES-GCM ciphertext, base64, chunked
    A random data key (DEK) encrypts the state. It is stored only wrapped: by a key derived from the
    password (PBKDF2-SHA256) and by one derived from a one-time recovery code.
-   Each Claude account that signs in keeps, in its own private space (data/users/<claude id>/):
-     (no sign-in is remembered per Claude account: several people can share one Claude account,
+   Each backend login keeps, in its own private space (data/users/<login id>/):
+     (no sign-in is remembered per login: several people can share one device or browser,
       so "stay signed in" lives on the device, one entry per Iron Log account — see devProfiles)
      ilbak-<acct>-m / -c<i>    a private copy of the same ciphertext, in case the shared copy is lost */
 (function(){
@@ -169,8 +169,8 @@ function flushBackup(){ if(bakTimer&&lastBox){ clearTimeout(bakTimer); bakTimer=
 addEventListener('pagehide',()=>{ flushBackup(); });
 
 /* ---------- sessions ----------
-   Remembered sign-ins are kept on this device, one per Iron Log account, never per Claude account:
-   two people sharing a Claude account each get their own profile. `last` is the profile this
+   Remembered sign-ins are kept on this device, one per Iron Log account, never per browser:
+   two people sharing a device each get their own profile. `last` is the profile this
    device opens straight into; with no `last`, the sign-in screen lists the remembered profiles. */
 const DEV_KEY='ironlog-profiles';
 function devGet(){ try{ const r=JSON.parse(localStorage.getItem(DEV_KEY)||'null'); if(r&&r.list&&typeof r.list==='object') return r; }catch(e){} return {last:null,list:{}}; }
@@ -196,7 +196,7 @@ async function openRemembered(id){
   }catch(e){ return false; }
 }
 async function restore(){
-  // retire the old one-per-Claude-account sign-in: it opened one person's profile for everyone on that Claude account
+  // retire the old one-per-login sign-in: it opened one person's profile for everyone on that login
   try{ const s=await mine('ilsession').get(); if(s.exists) await mine('ilsession').delete(); }catch(e){}
   const dv=devGet();
   return dv.last?openRemembered(dv.last):false;
@@ -254,8 +254,8 @@ async function switchProfile(){
   await backend.signOut();
   location.reload();
 }
-/* history already in this Claude account from before Iron Log accounts (offered at sign-up) */
-async function claudeCopy(){
+/* history saved under this login from before Iron Log accounts (offered at sign-up) */
+async function legacyCopy(){
   try{
     const m=await mine('state').get(); if(!m.exists) return null;
     const n=+(m.data().chunks)||0; let out='';
@@ -310,7 +310,7 @@ function showGate(mode,msg){
     if(await openRemembered(b.dataset.pid)) closeGate(); else showGate('in','That profile needs you to sign in again'); });
   const fb=gate.querySelector('#ilForgot'); if(fb) fb.onclick=()=>showGate('forgot');
   const bb=gate.querySelector('#ilBack'); if(bb) bb.onclick=()=>showGate('in');
-  if(mode==='up') claudeCopy().then(c=>{ const el=gate&&gate.querySelector('#ilImp'); if(c&&c.n&&el){ gate._seed=c;
+  if(mode==='up') legacyCopy().then(c=>{ const el=gate&&gate.querySelector('#ilImp'); if(c&&c.n&&el){ gate._seed=c;
     el.innerHTML=`<label class="ila-chk imp"><input type="checkbox" id="ilSeed"> Import ${c.n} older workout${c.n===1?'':'s'} saved here before Iron Log accounts. Tick only if they’re yours.</label>`; } });
   const go=gate.querySelector('#ilGo'), err=gate.querySelector('#ilErr');
   const val=id=>{ const x=gate.querySelector('#'+id); return x?x.value:''; };
@@ -327,7 +327,10 @@ function showGate(mode,msg){
         const rc=await signUp(val('ilU'),val('ilN'),val('ilP'),seed,rem); showGate('recovery',rc); }
     }catch(e){ err.textContent=e.message||'Something went wrong — try again'; go.disabled=false; go.textContent=mode==='in'?'Sign in':mode==='up'?'Create account':'Reset password'; }
   };
-  const first=gate.querySelector('input'); if(first) setTimeout(()=>{ try{ first.focus({preventScroll:true}); }catch(e){} },60);
+  const first=gate.querySelector('input'); if(first) setTimeout(()=>{ try{
+    // don't steal focus if a field is already in use (fast typing, password-manager autofill)
+    if(gate&&gate.contains(document.activeElement)&&document.activeElement.tagName==='INPUT') return;
+    if(first.isConnected) first.focus({preventScroll:true}); }catch(e){} },60);
 }
 function closeGate(){ if(gate){ gate.remove(); gate=null; } document.body.classList.remove('auth-on'); const r=resolveGate; resolveGate=null; if(r) r(true); }
 

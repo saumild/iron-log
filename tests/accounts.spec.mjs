@@ -26,6 +26,16 @@ const forgot = async (pg, user, code, pw) => {
   const { pg } = await device(browser, srv);
   await pg.open();
   check('[device] backend is device', (await pg.evaluate(() => ironPlatform.backend)) === 'device');
+  // regression: the sign-in screen's delayed auto-focus must not pull focus out of a field being filled
+  await waitGate(pg);
+  const focusRace = await pg.evaluate(async () => {
+    document.querySelector('.ilauth [data-m="up"]').click();            // re-renders; schedules auto-focus in 60 ms
+    const pw = document.querySelector('#ilP'); pw.focus(); pw.value = 'typed-fast';   // a field is in use right away
+    await new Promise(r => setTimeout(r, 200));
+    return { stillInPassword: document.activeElement === document.querySelector('#ilP'), user: document.querySelector('#ilU').value };
+  });
+  check('[device] sign-in screen doesn’t steal focus from a field in use', focusRace.stillInPassword && focusRace.user === '', JSON.stringify(focusRace));
+  await pg.reload(); await waitGate(pg);
   const rcA = await signUp(pg, 'alice', 'alice-pass-1', 'Alice');
   check('[device] recovery code issued', /^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/.test(rcA), rcA);
   await addLog(pg, 'a-1');

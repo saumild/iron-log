@@ -1,5 +1,5 @@
 /* js/health.js — Apple Health sync.
-   Web pages (Safari, home-screen apps, Claude) can't read HealthKit; only native iOS apps can.
+   Web pages (Safari, home-screen apps) can't read HealthKit; only native iOS apps can.
    So a Shortcuts personal automation on the iPhone runs every morning ("the cron job"), reads
    Health, and copies a small text export (and saves it to iCloud Drive). "Import from Apple Health"
    merges it here. Also accepts JSON from the Health Auto Export app.

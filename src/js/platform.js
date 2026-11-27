@@ -1,5 +1,5 @@
 /* js/platform.js — Iron Log platform layer (standalone build).
-   Gives the app the small set of services it used inside a Claude artifact, without Claude:
+   Gives the app the small set of services it needs from its host:
 
      ironPlatform.use('db')        document store: doc()/collection() get/set/update/delete,
                                    where('f','==',v) / orderBy / limit / add

@@ -1074,7 +1074,7 @@ body.live-on .topbar{display:none}
 @keyframes ilTitle{from{opacity:0;transform:translateY(10px)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}
 
-/* ---------- v2.1: Claude request box, period mode ---------- */
+/* ---------- v2.1: AI request box, period mode ---------- */
 .plask{margin-top:16px;padding:14px;border-radius:20px;background:var(--surface-2)}
 .plask-h{display:flex;justify-content:space-between;align-items:baseline;margin:0 2px 8px}
 .plask-h b{font-size:14px;font-weight:600;letter-spacing:-.01em}

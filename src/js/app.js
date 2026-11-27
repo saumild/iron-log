@@ -1,14 +1,14 @@
 /* js/app.js */
 /* ---------- storage ----------
    Tiers, each verified with a real write→read→delete probe at boot:
-     1. Claude artifact storage (running inside Claude)
+     1. host-provided storage (when embedded in a host that offers window.storage)
      2. localStorage           (served over http(s):// or a local file on Android)
      3. IndexedDB              (works in some contexts where localStorage is blocked)
      4. in-memory              (NOT persistent — the app warns loudly)              */
 const KEY='ironlog-v1';          /* NEVER change: this is where the user's data lives */
 const RESCUE_KEY='ironlog-rescue'; /* pre-migration snapshot, auto-kept */
-/* per-user in Claude: a device-wide copy could hand one person's history to another */
-const rescueKey=()=>HOSTED?'':RESCUE_KEY;   // in Claude: no plaintext copy on the device; the account keeps an encrypted backup
+/* per-account: a device-wide copy could hand one person's history to another */
+const rescueKey=()=>HOSTED?'':RESCUE_KEY;   // with accounts: no plaintext copy on the device; the account keeps an encrypted backup
 const SCHEMA=2;
 const PROBE=KEY+'__probe';
 let storageMode='memory';
@@ -36,11 +36,11 @@ const idb={
   del:k=>idbReq('readwrite',st=>st.delete(k)),
 };
 
-async function probeClaude(){
-  if(!window.storage) throw new Error('no claude storage');
+async function probeHostStore(){
+  if(!window.storage) throw new Error('no host storage');
   await window.storage.set(PROBE,'1',false);
   const r=await window.storage.get(PROBE,false);
-  if(!r||r.value!=='1') throw new Error('claude storage unverified');
+  if(!r||r.value!=='1') throw new Error('host storage unverified');
   try{ await window.storage.delete(PROBE,false); }catch(e){}
 }
 async function probeLocal(){
@@ -61,7 +61,7 @@ async function probeIdb(){
      1. bootLoaded — nothing may write before load() has finished reading.
      2. non-destructive writes — an empty state can never overwrite real data
         (only an explicit user restore may, via forceWrite). */
-let primaryTier=null;      // 'local' | 'idb' | 'claude' | null
+let primaryTier=null;      // 'local' | 'idb' | 'host' | null
 let legacyTiers=[];        // readable tiers that are not primary (adoption only)
 let bootLoaded=false;      // gate: no writes until load() completes
 /* multi-device safety: remember what was last loaded/saved, so closing the app never re-saves an
@@ -69,7 +69,7 @@ let bootLoaded=false;      // gate: no writes until load() completes
 let cleanSig=null, cleanAt='';
 const sigOf=s=>{ try{ const {savedAt,...rest}=s||{}; return JSON.stringify(rest); }catch(e){ return null; } };
 function markClean(){ cleanSig=sigOf(state); cleanAt=String((state&&state.savedAt)||''); }
-/* Running as a Claude artifact (claude.ai viewer): browser storage there can come back empty,
+/* Running inside an embedding host viewer: browser storage there can come back empty,
    so the durable copy lives in the viewer's own private `db` subtree, chunked under the
    256 KiB document limit. Everywhere else (the Netlify site, local dev) this tier never probes. */
 const HOSTED=typeof window!=='undefined'&&!!(window.ironPlatform&&typeof window.ironPlatform.use==='function');
@@ -103,16 +103,16 @@ let deviceTiers=[];   // HOSTED: device stores found, offered for import only wi
 async function initStore(){
   primaryTier=null; legacyTiers=[]; deviceTiers=[];
   if(HOSTED){
-    /* History belongs to the signed-in Claude user and lives only under data/users/<their id>.
+    /* History belongs to the signed-in account and lives only under data/users/<their id>.
        Device storage is shared by everyone who opens Iron Log in this browser, so it is never
        read as history, never used as a fallback and never copied into an account automatically. */
     if(window.IronAuth&&IronAuth.acct) primaryTier='ila';   // the signed-in Iron Log account, encrypted
-    try{ await probeCdb(); }catch(e){}                        // the Claude account's own copy: offered for import only
-    for(const [mode,probe] of [['local',probeLocal],['idb',probeIdb],['claude',probeClaude]]){ try{ await probe(); deviceTiers.push(mode); }catch(e){} }
+    try{ await probeCdb(); }catch(e){}                        // an older copy under this login: offered for import only
+    for(const [mode,probe] of [['local',probeLocal],['idb',probeIdb],['host',probeHostStore]]){ try{ await probe(); deviceTiers.push(mode); }catch(e){} }
     storageMode=primaryTier||'memory';
     return storageMode;
   }
-  for(const [mode,probe] of [['cdb',probeCdb],['local',probeLocal],['idb',probeIdb],['claude',probeClaude]]){
+  for(const [mode,probe] of [['cdb',probeCdb],['local',probeLocal],['idb',probeIdb],['host',probeHostStore]]){
     try{ await probe(); if(!primaryTier) primaryTier=mode; else legacyTiers.push(mode); }catch(e){}
   }
   storageMode=primaryTier||'memory';
@@ -124,7 +124,7 @@ async function readTier(mode){
     if(mode==='cdb')    return await cdbRead();
     if(mode==='local')  return window.localStorage.getItem(KEY);
     if(mode==='idb')    { const v=await idb.get(KEY); return v==null?null:v; }
-    if(mode==='claude') { const r=await window.storage.get(KEY,false); return r?r.value:null; }
+    if(mode==='host') { const r=await window.storage.get(KEY,false); return r?r.value:null; }
   }catch(e){}
   return null;
 }
@@ -133,7 +133,7 @@ async function writeTier(mode,v){
   if(mode==='cdb')    { await cdbWrite(v); return; }
   if(mode==='local')  { window.localStorage.setItem(KEY,v); return; }
   if(mode==='idb')    { await idb.set(KEY,v); return; }
-  if(mode==='claude') { await window.storage.set(KEY,v,false); return; }
+  if(mode==='host') { await window.storage.set(KEY,v,false); return; }
   throw new Error('no storage tier');
 }
 function snapInfo(raw){
@@ -172,8 +172,8 @@ async function writeRaw(v){
   if(primaryTier) await writeTier(primaryTier,v);
 }
 const STORAGE_OK=()=> !!primaryTier;
-const FRAGILE=()=> primaryTier==='claude';
-const MODE_LABEL={ila:'your Iron Log account (encrypted)',cdb:'older account copy',claude:'artifact storage',local:'this browser',idb:'IndexedDB',memory:'memory only'};
+const FRAGILE=()=> primaryTier==='host';
+const MODE_LABEL={ila:'your Iron Log account (encrypted)',cdb:'older account copy',host:'host storage',local:'this browser',idb:'IndexedDB',memory:'memory only'};
 const TIERS_LABEL=()=> primaryTier? MODE_LABEL[primaryTier] : 'memory only (NOT saved)';
 
 /* ---------- program data ---------- */
@@ -853,7 +853,7 @@ function renderStorageBanner(){
     el.className='';
     el.innerHTML=`<div class="banner" style="background:#FBF3E4;border-color:#EBD3A6;color:#7A5A1E">
       <b style="color:#5C4212">⚠ Preview mode — data is tied to this preview</b>
-      You're running inside the Claude app, where the browser blocks normal on-device storage.
+      You're running inside an embedded preview, where the browser blocks normal on-device storage.
       Your logs are saved, but <b>only to this preview</b> — if a new version is shared, this copy starts empty.<br><br>
       <b>Install the real app</b> (Add to Home Screen from your GitHub Pages link) for permanent storage.
       Until then, tap <b>Back up</b> in the You tab after each session.
@@ -940,7 +940,7 @@ async function pasteBackup(){
 }
 function renderDiag(){
   const el=$('#storeDiag'); if(!el) return;
-  const probe=[...(HOSTED?[['Server copy',primaryTier==='cdb'?'PRIMARY':false]]:[]),['localStorage',primaryTier==='local'?'PRIMARY':legacyTiers.includes('local')],['IndexedDB',primaryTier==='idb'?'PRIMARY':legacyTiers.includes('idb')],['Claude storage',primaryTier==='claude'?'PRIMARY':legacyTiers.includes('claude')]];
+  const probe=[...(HOSTED?[['Server copy',primaryTier==='cdb'?'PRIMARY':false]]:[]),['localStorage',primaryTier==='local'?'PRIMARY':legacyTiers.includes('local')],['IndexedDB',primaryTier==='idb'?'PRIMARY':legacyTiers.includes('idb')],['Host storage',primaryTier==='host'?'PRIMARY':legacyTiers.includes('host')]];
   el.innerHTML=`<div class="legend" style="text-align:left;margin-top:10px;line-height:1.7">
     <b>Storage diagnostics</b><br>
     ${probe.map(([n,st])=>`${st==='PRIMARY'?'★':st?'·':'✗'} ${n}${st==='PRIMARY'?' — primary':''}`).join('<br>')}<br>
@@ -1218,18 +1218,18 @@ function renderFeelRow(entry){
 /* ================= shared AI request ================= */
 /* API_AVAILABLE: an AI provider with a key is set up on this device (js/ai.js); otherwise copy & paste */
 let API_AVAILABLE=false;
-let claudeSample=null;   // the in-app AI call (any provider); name kept from the Claude build
+let aiSample=null;   // the in-app AI call (any provider)
 async function initSample(){
-  claudeSample=null; API_AVAILABLE=false;
-  try{ const fn=await window.ironPlatform.use('sample'); if(fn){ claudeSample=fn; API_AVAILABLE=true; } }catch(e){}
+  aiSample=null; API_AVAILABLE=false;
+  try{ const fn=await window.ironPlatform.use('sample'); if(fn){ aiSample=fn; API_AVAILABLE=true; } }catch(e){}
 }
 window.aiProviderChanged=()=>{ initSample().then(()=>{ try{ if(activeView==='coach') showView('coach'); }catch(e){} }); };
 function b64ToBlob(b64,type){ const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new Blob([u],{type}); }
 async function askAI(content,maxTokens){
-  if(claudeSample){
+  if(aiSample){
     const text=content.filter(b=>b.type==='text').map(b=>b.text).join('\n\n');
     const images=content.filter(b=>b.type==='image'&&b.source&&b.source.data).map(b=>b64ToBlob(b.source.data,b.source.media_type));
-    try{ const r=await claudeSample(text,{images,maxTokens}); return r.text; }
+    try{ const r=await aiSample(text,{images,maxTokens}); return r.text; }
     catch(e){ lastAIError=(e&&e.message)||''; throw e; }
   }
   lastAIError='No AI provider is set up';
@@ -1461,8 +1461,8 @@ $('#fcImgFile').onchange=e=>{ if(e.target.files.length) runFormCheckPhotos(e.tar
 
 /* PWA: register the service worker so the app opens offline */
 try{
-  // offline support wherever the app is served over http(s) — not inside the Claude artifact viewer
-  if(location.protocol.startsWith('http') && !/(^|\.)claude\.(ai|com)$/.test(location.hostname) && 'serviceWorker' in navigator){
+  // offline support wherever the app is served over http(s)
+  if(location.protocol.startsWith('http') && 'serviceWorker' in navigator){
     window.addEventListener('load',()=>{ try{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }catch(e){} });
   }
 }catch(e){}

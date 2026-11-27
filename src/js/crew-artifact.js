@@ -5,7 +5,7 @@
    members read a group, and each member writes only under their own account (supabase/schema.sql).
    Your crew id is kept on your private account record (ilacct/<id>.crew). Needs the Supabase backend;
    in device-only mode Crew reports 'out'.
-   (Original notes from the Claude-artifact version follow; paths there were crew/<id>/….)
+   (Original notes from the first, single-crew version follow; paths there were crew/<id>/….)
    An artifact page can't reach the Iron Log server, so here Crew runs on the artifact's own
    shared `db`. Your crew is everyone the artifact is shared with who tapped "Join crew".
    It answers the same requests as netlify/lib/api-core.mjs, with the same response shapes,
@@ -19,7 +19,7 @@
      crew/<id>/nudges/<cid>       a nudge this member sent ({to, msg})
    Likes, comments and nudges live with whoever made them, so notifications are gathered by
    reading the other members' subtrees. Names are never stored: a member's own nickname, else
-   their Iron Log account name. Members are Iron Log accounts (ilcrew/<account id>), not Claude users. */
+   their Iron Log account name. Members are Iron Log accounts (ilcrew/<account id>), not device or browser users. */
 (function(){
 if(!HOSTED) return;
 const AVATARS=['🏋️','💪','🔥','🦍','🐻','🦁','🐺','🦅','⚡','🚀','🥇','🧠','🐉','🌟','🏃','🧘'];
@@ -47,7 +47,7 @@ const avatarOk=a=>AVATARS.includes(a)?a:'🏋️';
 
 function init(){
   return ready||(ready=(async()=>{
-    // Crew identity is the signed-in Iron Log account, never the Claude account
+    // Crew identity is the signed-in Iron Log account
     if(!window.ironPlatform||ironPlatform.backend!=='supabase') return false;   // Crew needs the online backend
     const d=await window.ironPlatform.use('db'); const acc=window.IronAuth&&IronAuth.acct;
     if(!d||!acc){ ready=null; return false; }

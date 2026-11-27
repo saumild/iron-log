@@ -235,7 +235,7 @@ const LIB_RAW=[
 ];
 const LIBRARY={};
 LIB_RAW.forEach(([id,name,muscle,equip,type,sec])=>{ LIBRARY[id]={id,name,muscle,equip,type,secondary:sec?sec.split(','):[]}; });
-/* yoga poses: built-in yg_ ids, or a custom pose Claude invented (customEx.yoga) */
+/* yoga poses: built-in yg_ ids, or a custom pose the AI invented (customEx.yoga) */
 function isYoga(id){ id=String(id||''); return id.startsWith('yg_')||!!(state&&state.customEx&&state.customEx[id]&&state.customEx[id].yoga); }
 /* every session — lifting or yoga — is planned to fit this window */
 const SESSION_MIN=30, SESSION_MAX=45;
