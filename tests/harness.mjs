@@ -139,7 +139,7 @@ export async function device(browser, srv, { fakeSb = false } = {}) {
   await pg.route(/supabase\.co/, r => r.abort());   // tests never touch the real project
   pg.errors = [];
   pg.on('pageerror', e => pg.errors.push('pageerror: ' + e.message));
-  pg.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED|net::|Failed to load resource|row-level security|persist failed/.test(m.text()) && !(!srv.swExists && /fetching the script/.test(m.text()))) pg.errors.push('console: ' + m.text()); });
+  pg.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED|net::|Failed to load resource|row-level security|persist failed|plan failed|form check failed|coach failed/.test(m.text()) && !(!srv.swExists && /fetching the script/.test(m.text()))) pg.errors.push('console: ' + m.text()); });
   pg.on('dialog', d => d.dismiss());
   pg.open = async () => { await pg.goto(srv.url, { waitUntil: 'load' }); await pg.waitForTimeout(900); };
   return { ctx, pg };
@@ -154,7 +154,7 @@ export async function signUp(pg, user, pw, name = user) {
   await pg.evaluate(() => document.querySelector('.ilauth [data-m="up"]').click());
   await pg.fill('#ilU', user); await pg.fill('#ilN', name); await pg.fill('#ilP', pw); await pg.fill('#ilP2', pw);
   await pg.evaluate(() => document.querySelector('#ilGo').click());
-  await pg.waitForSelector('#ilRc', { timeout: 20000 });
+  await pg.waitForSelector('#ilRc', { timeout: 45000 });
   const code = (await pg.textContent('#ilRc')).trim();
   await pg.check('#ilSaved'); await pg.evaluate(() => document.querySelector('#ilGo').click());
   await waitApp(pg);

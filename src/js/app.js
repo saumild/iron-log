@@ -173,7 +173,7 @@ async function writeRaw(v){
 }
 const STORAGE_OK=()=> !!primaryTier;
 const FRAGILE=()=> primaryTier==='claude';
-const MODE_LABEL={ila:'your Iron Log account (encrypted)',cdb:'your Claude account',claude:'Claude storage',local:'this browser',idb:'IndexedDB',memory:'memory only'};
+const MODE_LABEL={ila:'your Iron Log account (encrypted)',cdb:'older account copy',claude:'artifact storage',local:'this browser',idb:'IndexedDB',memory:'memory only'};
 const TIERS_LABEL=()=> primaryTier? MODE_LABEL[primaryTier] : 'memory only (NOT saved)';
 
 /* ---------- program data ---------- */
@@ -777,11 +777,11 @@ function showView(v){
   });
   document.querySelectorAll('.nbtn').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   if(v==='stats') renderStats();
-  if(v==='you') renderYou();
+  if(v==='you'){ renderYou(); try{ IronAI.renderCard(); }catch(e){} }
   if(v==='crew' && window.Social) Social.render();
   if(v==='coach'){ renderCoach(); renderAILast();
     const n=$('#bridgeNote');
-    if(n) n.innerHTML = API_AVAILABLE ? '' : ' <b style="color:var(--steel)">On your phone this hands the prompt to the Claude app — no key or server needed.</b>';
+    if(n) n.innerHTML = API_AVAILABLE ? '' : ' <b style="color:var(--steel)">This hands the prompt to ChatGPT, Claude, Gemini or any AI app — no key needed. Or add your own key in You → AI coach.</b>';
   }
   window.scrollTo(0,0);
 }
@@ -930,7 +930,7 @@ async function pasteBackup(){
 }
 function renderDiag(){
   const el=$('#storeDiag'); if(!el) return;
-  const probe=[...(HOSTED?[['Claude account',primaryTier==='cdb'?'PRIMARY':false]]:[]),['localStorage',primaryTier==='local'?'PRIMARY':legacyTiers.includes('local')],['IndexedDB',primaryTier==='idb'?'PRIMARY':legacyTiers.includes('idb')],['Claude storage',primaryTier==='claude'?'PRIMARY':legacyTiers.includes('claude')]];
+  const probe=[...(HOSTED?[['Server copy',primaryTier==='cdb'?'PRIMARY':false]]:[]),['localStorage',primaryTier==='local'?'PRIMARY':legacyTiers.includes('local')],['IndexedDB',primaryTier==='idb'?'PRIMARY':legacyTiers.includes('idb')],['Claude storage',primaryTier==='claude'?'PRIMARY':legacyTiers.includes('claude')]];
   el.innerHTML=`<div class="legend" style="text-align:left;margin-top:10px;line-height:1.7">
     <b>Storage diagnostics</b><br>
     ${probe.map(([n,st])=>`${st==='PRIMARY'?'★':st?'·':'✗'} ${n}${st==='PRIMARY'?' — primary':''}`).join('<br>')}<br>
@@ -1097,7 +1097,7 @@ Respond with ONLY valid JSON, no markdown fences, no preamble:
         const result=parseCoachJSON(txt);
         state.aiCoach={date:todayStr(),result};
         await persist(); renderAICoach(result); renderAILast();
-      }catch(e){ toast('That didn\u2019t look like the expected result — copy Claude\u2019s full reply'); }
+      }catch(e){ toast('That didn\u2019t look like the expected result — copy the AI\u2019s full reply'); }
     });
     return;
   }
@@ -1206,45 +1206,43 @@ function renderFeelRow(entry){
 }
 
 /* ================= shared AI request ================= */
-let API_AVAILABLE = (typeof window!=='undefined') && /(^|\.)claude\.(ai|com)$/.test(location.hostname||'');
-let claudeSample=null;
+/* API_AVAILABLE: an AI provider with a key is set up on this device (js/ai.js); otherwise copy & paste */
+let API_AVAILABLE=false;
+let claudeSample=null;   // the in-app AI call (any provider); name kept from the Claude build
 async function initSample(){
-  if(!HOSTED) return;
+  claudeSample=null; API_AVAILABLE=false;
   try{ const fn=await window.ironPlatform.use('sample'); if(fn){ claudeSample=fn; API_AVAILABLE=true; } }catch(e){}
 }
+window.aiProviderChanged=()=>{ initSample().then(()=>{ try{ if(activeView==='coach') showView('coach'); }catch(e){} }); };
 function b64ToBlob(b64,type){ const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new Blob([u],{type}); }
 async function askAI(content,maxTokens){
   if(claudeSample){
     const text=content.filter(b=>b.type==='text').map(b=>b.text).join('\n\n');
     const images=content.filter(b=>b.type==='image'&&b.source&&b.source.data).map(b=>b64ToBlob(b.source.data,b.source.media_type));
-    try{ const r=await claudeSample(text,images.length?{images}:{}); return r.text; }
-    catch(e){ throw new Error((e&&e.code)||'sample failed'); }
+    try{ const r=await claudeSample(text,{images,maxTokens}); return r.text; }
+    catch(e){ lastAIError=(e&&e.message)||''; throw e; }
   }
-  const response=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens||1000,messages:[{role:'user',content}]})
-  });
-  const data=await response.json();
-  if(data.error) throw new Error(data.error.message||'api error');
-  return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+  lastAIError='No AI provider is set up';
+  throw new Error(lastAIError);
 }
-/* ===== Claude bridge: no server, no API key — copy prompt out, paste reply back ===== */
+let lastAIError='';
+/* ===== AI bridge: no server, no API key — copy prompt out to any AI app, paste reply back ===== */
 let bridgePrompt='';
 function bridgeHTML(promptText,kind){
   bridgePrompt=promptText;
-  return `<div class="ai-sum"><b>Analyze in the Claude app</b><br>
+  return `<div class="ai-sum"><b>Use your AI app</b><br>
     1 · Tap <b>Copy prompt</b> below<br>
-    2 · Open Claude, paste, and send<br>
-    3 · Copy Claude's whole reply, come back and tap <b>Paste result</b></div>
+    2 · Open ChatGPT, Claude, Gemini or any AI app, paste, and send<br>
+    3 · Copy the whole reply, come back and tap <b>Paste result</b></div>
     <button class="applybtn" id="brCopy" style="width:100%;height:46px;margin-bottom:8px">📋 Copy prompt</button>
-    <button class="dbtn" id="brPaste" style="width:100%;height:46px">📥 Paste Claude's result</button>
-    <textarea id="brBox" class="brbox" placeholder="…or paste Claude's reply here"></textarea>
+    <button class="dbtn" id="brPaste" style="width:100%;height:46px">📥 Paste the AI's reply</button>
+    <textarea id="brBox" class="brbox" placeholder="…or paste the AI's reply here"></textarea>
     <button class="dbtn" id="brApply" style="width:100%;height:44px;margin-top:8px">Use this result</button>
     <div class="legend" style="margin-top:8px">Nothing is uploaded from this app — you carry the text across yourself.</div>`;
 }
 function wireBridge(onResult){
   const copy=async()=>{
-    try{ await navigator.clipboard.writeText(bridgePrompt); toast('Prompt copied — paste it into Claude'); }
+    try{ await navigator.clipboard.writeText(bridgePrompt); toast('Prompt copied — paste it into your AI app'); }
     catch(e){ const b=$('#brBox'); b.value=bridgePrompt; b.select(); toast('Select the text above and copy'); }
   };
   $('#brCopy').onclick=copy;
@@ -1252,7 +1250,7 @@ function wireBridge(onResult){
     try{ const txt=await navigator.clipboard.readText(); if(txt){ $('#brBox').value=txt; onResult(txt); } else toast('Clipboard is empty'); }
     catch(e){ toast('Paste into the box below, then tap Use this result'); }
   };
-  $('#brApply').onclick=()=>{ const v=$('#brBox').value.trim(); if(v) onResult(v); else toast('Paste Claude\u2019s reply first'); };
+  $('#brApply').onclick=()=>{ const v=$('#brBox').value.trim(); if(v) onResult(v); else toast('Paste the AI\u2019s reply first'); };
 }
 function parseCoachJSON(text){
   let t=String(text).replace(/```json|```/g,'').trim();
@@ -1263,7 +1261,8 @@ function parseCoachJSON(text){
   return r;
 }
 function aiUnavailableHTML(){
-  return `<div class="ai-sum">Couldn\u2019t reach the AI coach${navigator.onLine===false?' — you appear to be offline':''}. AI features work when the tracker runs inside Claude; on a self-hosted copy they aren\u2019t available.<br><br>The built-in rule engine still flags load increases automatically.</div>`;
+  const why=lastAIError?` <b>${String(lastAIError).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</b>.`:'';
+  return `<div class="ai-sum">Couldn\u2019t reach the AI coach${navigator.onLine===false?' — you appear to be offline':''}.${why} ${/AI coach/.test(lastAIError)?'':'Check <b>You → AI coach</b>. '}You can also switch it to <b>Copy &amp; paste</b> to use any AI app without a key.<br><br>The built-in rule engine still flags load increases automatically.</div>`;
 }
 
 /* ================= AI form check (video) ================= */
@@ -1391,13 +1390,13 @@ function showFormBridge(name){
   const inj=(state.profile&&state.profile.injuries)?` I've noted: ${state.profile.injuries}.` : '';
   const p=`I'm going to share a video (or photos) of my ${name}.${inj} As a strength coach, tell me: 1) what looks good, 2) the single most important correction and exactly how to fix it, 3) any injury-risk red flags (spine position, joint tracking, bar path, range of motion). Keep it under 200 words and practical.`;
   $('#aiTtl').textContent='Form check'; $('#aiDt').textContent=name;
-  $('#aiBody').innerHTML=`<div class="ai-sum"><b>Form check in the Claude app</b><br>
-    Claude reads video directly, so this works best there:<br>
+  $('#aiBody').innerHTML=`<div class="ai-sum"><b>Form check in your AI app</b><br>
+    AI apps that read video (ChatGPT, Claude, Gemini) work best for this:<br>
     1 · Tap <b>Copy prompt</b><br>
-    2 · Open Claude, attach your video or photos, paste the prompt, send</div>
+    2 · Open your AI app, attach your video or photos, paste the prompt, send</div>
     <button class="applybtn" id="brCopy" style="width:100%;height:46px">📋 Copy prompt</button>
     <textarea id="brBox" class="brbox" style="min-height:80px"></textarea>
-    <div class="legend" style="margin-top:6px">Your video stays in your camera roll — you attach it in Claude yourself.</div>`;
+    <div class="legend" style="margin-top:6px">Your video stays in your camera roll — you attach it in your AI app yourself.</div>`;
   bridgePrompt=p;
   $('#brCopy').onclick=async()=>{ try{ await navigator.clipboard.writeText(p); toast('Prompt copied'); }catch(e){ $('#brBox').value=p; toast('Select and copy the text'); } };
   $('#aiScrim').classList.add('show');
@@ -1469,6 +1468,7 @@ window.appReady=(async function init(){
   const safe=(name,fn)=>{ try{ fn(); }catch(e){ console.error('render failed:',name,e); } };
   safe('banner',renderStorageBanner);
   safe('account',()=>window.IronAuth&&IronAuth.renderCard());
+  safe('ai',()=>window.IronAI&&IronAI.renderCard());
   try{ await offerDeviceImport(); }catch(e){ console.warn('device import check failed',e); }
   safe('coach',renderCoach);
   safe('gamify',renderGamify);

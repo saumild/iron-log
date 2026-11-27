@@ -210,7 +210,7 @@ function renderHome(){
     </div>
     <div class="rhead"><span>Your routines</span></div>
     ${state.routines.length?`<div class="rlist">${state.routines.map(card).join('')}</div>`
-      :'<div class="legend" style="text-align:left;margin:0 2px 12px">No routines yet. Create one above, save today’s plan as one, or apply a routine Claude suggests. A routine starts only after it’s saved.</div>'}`;
+      :'<div class="legend" style="text-align:left;margin:0 2px 12px">No routines yet. Create one above, save today’s plan as one, or apply a routine the AI suggests. A routine starts only after it’s saved.</div>'}`;
   el.insertAdjacentHTML('beforeend',historyHTML());
   wireHistory(el);
   if(window.Planner) try{ Planner.render($('#planCard')); }catch(e){ console.error('plan render failed',e); }

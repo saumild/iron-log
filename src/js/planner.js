@@ -401,7 +401,7 @@ function modReason(){
   if(planKind()==='yoga'&&yogaFlavor()==='period') parts.push('Period care');
   let inj=[]; try{ inj=injuryAvoid().hit; }catch(e){}
   if(inj.length) parts.push('your '+inj.join(' & ')+' (from your profile)');
-  if(!parts.length&&aiNote(planKind())) parts.push('your request to Claude');
+  if(!parts.length&&aiNote(planKind())) parts.push('your request to the AI');
   return 'Because of '+parts.join(' and ');
 }
 const modVideo=(m,id)=>'https://www.youtube.com/results?search_query='+encodeURIComponent(m.v||((m.t||exName(id).split(' · ')[0])+' yoga modification'));
@@ -474,7 +474,7 @@ function parseYogaJSON(text,target){
     const e=yogaEx(id,hold,+x.sides===2?2:1,Math.min(6,Math.max(1,+x.rounds||1)));
     if(x.note) e.note=String(x.note).slice(0,140)+(e.note?' · '+e.note:'');
     const md=x.modification||x.mod; if(md&&typeof md==='object'&&String(md.title||md.t||'').trim())
-      e.mod={t:String(md.title||md.t).slice(0,60),how:String(md.how||'').slice(0,240),v:String(md.video||md.v||'').slice(0,100),why:'Claude',k:2};   // k:2 = written under the selective-modification prompt
+      e.mod={t:String(md.title||md.t).slice(0,60),how:String(md.how||'').slice(0,240),v:String(md.video||md.v||'').slice(0,100),why:'AI',k:2};   // k:2 = written under the selective-modification prompt
     return e;
   }).filter(Boolean);
   if(periodOn()||prenatalOn()) for(let i=exercises.length-1;i>=0;i--) if((periodOn()?PERIOD_AVOID:PRENATAL_AVOID).includes(exercises[i].id)) exercises.splice(i,1);
@@ -639,7 +639,7 @@ function setsSummary(e){
 }
 function render(el){
   const cur=current(), p=cur.plan, yoga=p.kind==='yoga';
-  const src=cur.source==='claude'?'<span class="psrc ai">🧠 Claude</span>':`<span class="psrc">${yoga?'⚙︎ Starter flow':'⚙︎ Auto-planned'}</span>`;
+  const src=cur.source==='claude'?'<span class="psrc ai">🧠 AI</span>':`<span class="psrc">${yoga?'⚙︎ Starter flow':'⚙︎ Auto-planned'}</span>`;
   const items=yoga?'poses':'exercises';
   el.innerHTML=`<div class="plan${cur.done?' done':''}">
     <div class="kindseg" role="tablist"><button data-kind="strength" class="${p.kind==='strength'||!p.kind?'on':''}">Strength</button><button data-kind="home" class="${p.kind==='home'?'on':''}">Home</button><button data-kind="yoga" class="${yoga?'on':''}">Yoga</button></div>
@@ -652,13 +652,13 @@ function render(el){
     ${(()=>{ const n=planMods(p).length; return n?`<button class="modbanner" data-mods="1"><span class="modic">⚠︎</span><span><b>${n} pose${n===1?' needs':'s need'} a modification</b><small>${h(modReason())} · tap to see how, with videos</small></span><span class="chev">›</span></button>`:''; })()}
     <div class="plan-ex">${p.exercises.map(e=>`<div class="pxr"><button class="pxn" data-pex="${h(e.id)}">${poseHTML(exName(e.id))}${e.ss?' <span class="sstag">SS</span>':''}</button><span class="pxs">${setsSummary(e)}</span>${modsFor(e.id).map(m=>`<button class="modtag" data-mods="1">⚠︎ ${m.why?h(m.why[0].toUpperCase()+m.why.slice(1))+': ':''}${h(m.t)}</button>`).join('')}${e.note?`<small>${h(e.note)}</small>`:''}</div>`).join('')}</div>
     <div class="plan-meta">~${p.durationMin} min · ${p.exercises.length} ${items}${yoga?'':` · ${p.setsTotal||p.exercises.reduce((n,e)=>n+e.sets.length,0)} sets`}${p.warmup?` · warm-up: ${h(p.warmup)}`:''}</div>
-    ${yoga&&cur.source!=='claude'&&!cur.done?'<div class="plan-rest yoga">🧠 This is a starter flow. Tap <b>Generate my yoga flow</b> and Claude writes one around your recent lifting, recovery and injuries.</div>':''}
+    ${yoga&&cur.source!=='claude'&&!cur.done?'<div class="plan-rest yoga">🧠 This is a starter flow. Tap <b>Generate my yoga flow</b> and the AI writes one around your recent lifting, recovery and injuries.</div>':''}
     ${cur.done?'<button class="dbtn" id="plAgain" style="width:100%">Plan another session</button>':`<button class="crew-btn cta" id="plStart"><span>Start today’s ${yoga?'yoga':p.kind==='home'?'home workout':'workout'} <small>~${p.durationMin} min</small></span><span class="arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`}
     <div class="plan-adj">${Object.entries(ADJUST).map(([k,l])=>`<button data-adj="${k}" class="${cur.adjust===k?'on':''}">${l}</button>`).join('')}<button id="plSet">⚙ Settings</button></div>
     <div class="plask${yoga?' yoga':''}">
-      <div class="plask-h"><b>${yoga?'Let Claude write your flow':p.kind==='home'?'Let Claude plan your home workout':'Let Claude plan your workout'}</b><small>optional</small></div>
+      <div class="plask-h"><b>${yoga?'Let AI write your flow':p.kind==='home'?'Let AI plan your home workout':'Let AI plan your workout'}</b><small>optional</small></div>
       <textarea id="plNote" rows="2" maxlength="400" placeholder="${yoga?'e.g. tight hips after squats, 30 min, no wrist-heavy poses, extra hamstring work':p.kind==='home'?'e.g. small room, no jumping (neighbours), focus on legs and core':'e.g. sore lower back, only dumbbells today, focus on arms, 35 min max'}">${h(aiNote(planKind()))}</textarea>
-      <button class="aibtn${yoga?' primary':''}" id="plAI">✨ ${yoga?(cur.source==='claude'?'Generate a different flow':'Generate my yoga flow'):(cur.source==='claude'?'Re-plan with Claude':'Ask Claude to plan today')}</button>
+      <button class="aibtn${yoga?' primary':''}" id="plAI">✨ ${yoga?(cur.source==='claude'?'Generate a different flow':'Generate my yoga flow'):(cur.source==='claude'?'Re-plan with AI':'Ask AI to plan today')}</button>
     </div>
     ${(p.routineUpdates||[]).map((u,i)=>{ const done=(cur.applied||[]).includes(i);
       return `<div class="ru"><div class="ru-h"><b>${u.action==='update'?'Update routine':'New routine'}: ${h(u.name)}</b>${done?'<span class="chip on">applied</span>':''}</div>
@@ -692,18 +692,18 @@ async function askClaude(adjust){
   const use=async txt=>{
     let plan; try{ plan=yoga?parseYogaJSON(txt,adjust==='short'?SESSION_MIN:settings().minutes):parsePlanJSON(txt);
       if(planKind()==='home'){ const bad=plan.exercises.filter(e=>!HOME_IDS.has(e.id)); plan.exercises=plan.exercises.filter(e=>HOME_IDS.has(e.id)); if(plan.exercises.length<3) throw new Error('needs equipment'); plan=homePlan(plan); if(bad.length) toast('Left out '+bad.length+' move'+(bad.length>1?'s':'')+' that need equipment'); } }
-    catch(e){ toast(yoga?'That didn’t look like a yoga flow — copy Claude’s whole reply':'That didn’t look like a workout plan — copy Claude’s whole reply'); return; }
-    await setPlan(plan,'claude',adjust); $('#aiScrim').classList.remove('show'); toast((yoga?'Claude wrote today’s flow: ':'Claude planned today: ')+plan.title);
+    catch(e){ toast(yoga?'That didn’t look like a yoga flow — copy the AI’s whole reply':'That didn’t look like a workout plan — copy the AI’s whole reply'); return; }
+    await setPlan(plan,'claude',adjust); $('#aiScrim').classList.remove('show'); toast((yoga?'AI wrote today’s flow: ':'AI planned today: ')+plan.title);
   };
-  $('#aiTtl').textContent=yoga?'Yoga flow by Claude':planKind()==='home'?'Home workout by Claude':'Plan today with Claude'; $('#aiDt').textContent=prettyDate(todayStr());
+  $('#aiTtl').textContent=yoga?'Yoga flow by AI':planKind()==='home'?'Home workout by AI':'Plan today with AI'; $('#aiDt').textContent=prettyDate(todayStr());
   if(API_AVAILABLE){
-    $('#aiBody').innerHTML=`<div class="ai-sum"><span class="spin"></span> ${yoga?'Claude is reading your recent lifting and writing a 30–45 min yoga flow…':'Claude is reading your training log and planning today…'}</div>`;
+    $('#aiBody').innerHTML=`<div class="ai-sum"><span class="spin"></span> ${yoga?'The AI is reading your recent lifting and writing a 30–45 min yoga flow…':'The AI is reading your training log and planning today…'}</div>`;
     $('#aiScrim').classList.add('show');
     try{ await use(await askAI([{type:'text',text:prompt}],2500)); }
     catch(e){ console.error('plan failed',e); $('#aiBody').innerHTML=aiUnavailableHTML(); }
     return;
   }
-  $('#aiBody').innerHTML=bridgeHTML(prompt,'plan')+`<div class="legend" style="margin-top:6px">${yoga?'The prompt includes your recent lifting, recovery, goal and injuries, so Claude can build a flow that helps your training.':'The prompt includes your recent workouts, recovery, best lifts, goal, injuries, equipment and routines, so Claude can plan around all of it.'}</div>`;
+  $('#aiBody').innerHTML=bridgeHTML(prompt,'plan')+`<div class="legend" style="margin-top:6px">${yoga?'The prompt includes your recent lifting, recovery, goal and injuries, so the AI can build a flow that helps your training.':'The prompt includes your recent workouts, recovery, best lifts, goal, injuries, equipment and routines, so the AI can plan around all of it.'}</div>`;
   $('#aiScrim').classList.add('show');
   wireBridge(use);
 }
@@ -712,7 +712,7 @@ async function applyRoutineUpdate(i){
   const cur=current(), u=cur.plan.routineUpdates[i]; if(!u) return;
   if(u.action==='update'){
     const r=state.routines.find(x=>x.id===u.routineId); if(!r){ toast('That routine no longer exists'); return; }
-    if(!await ask(`Replace the exercises in “${r.name}” with Claude’s version?`,'Replace')) return;
+    if(!await ask(`Replace the exercises in “${r.name}” with the AI’s version?`,'Replace')) return;
     r.exercises=u.exercises.map(e=>({...e})); if(u.name) r.name=u.name;
   } else {
     state.routines.push({id:'r'+Date.now().toString(36),name:u.name,exercises:u.exercises.map(e=>({...e})),why:u.reason});
